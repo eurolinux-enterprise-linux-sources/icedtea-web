@@ -1,0 +1,40 @@
+# HG changeset patch
+# User Jiri Vanek <jvanek@redhat.com>
+# Date 1526310938 -7200
+#      Mon May 14 17:15:38 2018 +0200
+# Node ID bcbef8d7bbd6369b3c8d545469e1c56e47075d9d
+# Parent  4abd0f0897738289a19ef9238f02c6e9dafee6a4
+AppletEnvironment.java: getDocumentBase no returns codeBase as fallback when  documentBase is null.
+Oracle Applications R12, Oracle Forms Java Webstart application is requesting getDocumentBase where it shouldn't, however they refuse to modify their code and add ITW to supported platforms
+
+diff -r 4abd0f089773 -r bcbef8d7bbd6 ChangeLog
+--- a/ChangeLog	Fri Mar 02 10:41:29 2018 +0100
++++ b/ChangeLog	Mon May 14 17:15:38 2018 +0200
+@@ -1,3 +1,9 @@
++2018-05-14  Jiri Vanek <jvanek@redhat.com>
++
++	* netx/net/sourceforge/jnlp/runtime/AppletEnvironment.java: getDocumentBase now returns codeBase as fallback when 
++	documentBase is null. Oracle Applications R12, Oracle Forms Java Webstart application is requesting getDocumentBase
++	where it shouldn't, however they refuse to modify their code and add ITW to supported platforms
++
+ 2018-02-06  Jiri Vanek <jvanek@redhat.com>
+ 
+ 	Added test for javafx-desc
+diff -r 4abd0f089773 -r bcbef8d7bbd6 netx/net/sourceforge/jnlp/runtime/AppletEnvironment.java
+--- a/netx/net/sourceforge/jnlp/runtime/AppletEnvironment.java	Fri Mar 02 10:41:29 2018 +0100
++++ b/netx/net/sourceforge/jnlp/runtime/AppletEnvironment.java	Mon May 14 17:15:38 2018 +0200
+@@ -375,8 +375,12 @@
+     @Override
+     public URL getDocumentBase() {
+         checkDestroyed();
+-
+-        return file.getApplet().getDocumentBase();
++        URL db = file.getApplet().getDocumentBase();
++        if (db == null) {
++            return getCodeBase();
++        } else {
++            return db;
++        }
+     }
+ 
+     // FIXME: Sun's applet code forces all parameters to lower case.

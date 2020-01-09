@@ -3,6 +3,10 @@
 
 # Alternatives priority
 %define priority 18000
+# jnlp prorocol gnome registry keys
+%define gurlhandler   /desktop/gnome/url-handlers
+%define jnlphandler   %{gurlhandler}/jnlp
+%define jnlpshandler  %{gurlhandler}/jnlps
 
 %define javadir     %{_jvmdir}/java-%{javaver}-openjdk.%{_arch}
 %define jredir      %{_jvmdir}/jre-%{javaver}-openjdk.%{_arch}
@@ -14,15 +18,21 @@
 
 %define binsuffix      .itweb
 
+%define preffered_java  java-%{javaver}-openjdk
+
 Name:		icedtea-web
-Version:	1.6.2
-Release:	1%{?dist}
+Version:	1.7.1
+Release:	7%{?dist}
 Summary:	Additional Java components for OpenJDK - Java browser plug-in and Web Start implementation
 
 Group:      Applications/Internet
 License:    LGPLv2+ and GPLv2 with exceptions
 URL:        http://icedtea.classpath.org/wiki/IcedTea-Web
 Source0:    http://icedtea.classpath.org/download/source/%{name}-%{version}.tar.gz
+Patch0:     bashCompDirHardcodedAgain.patch
+Patch1:     1473-1480.patch
+Patch2:     oracleForms.patch
+Patch3:     headlessCheckSoftening_rhbz1581598.patch
 
 BuildRequires:  java-%{javaver}-openjdk-devel
 BuildRequires:  desktop-file-utils
@@ -42,18 +52,23 @@ Requires:      java-%{javaver}-openjdk
 
 # For the mozilla plugin dir
 Requires:       mozilla-filesystem%{?_isa}
-
 # When itw builds against it, it have to be also in runtime
 Requires:      tagsoup
-
 # rhino is used as JS evaluator in runtime
 Requires:      rhino
 
-# Post requires alternatives to install plugin alternative.
+# Post requires alternatives to install tool alternatives.
 Requires(post):   %{_sbindir}/alternatives
-
-# Postun requires alternatives to uninstall plugin alternative.
+# in version 1.7 and higher for --family switch
+Requires(post):   chkconfig
+# jnlp protocols support
+Requires(post):   GConf2
+# Postun requires alternatives to uninstall tool alternatives.
 Requires(postun): %{_sbindir}/alternatives
+# in version 1.7 and higher for --family switch
+Requires(postun):   chkconfig
+# jnlp protocols support
+Requires(postun):   GConf2
 
 # Standard JPackage plugin provides.
 Provides: java-plugin = 1:%{javaver}
@@ -80,8 +95,22 @@ BuildArch:  noarch
 %description javadoc
 This package contains Javadocs for the IcedTea-Web project.
 
+
+%package devel
+Summary:    pure sources for debugging IcedTea-Web
+Group:      devel
+Requires:   %{name} = %{version}-%{release}
+BuildArch:  noarch
+
+%description devel
+This package contains ziped sources of the IcedTea-Web project.
+
 %prep
 %setup -q
+%patch0 -p1
+%patch1 -p1
+%patch2 -p1
+%patch3 -p1
 
 %build
 autoreconf -vfi
@@ -102,10 +131,12 @@ make install DESTDIR=$RPM_BUILD_ROOT
 
 # icedteaweb-completion is currently not handled by make nor make install
 mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d/
-cp icedteaweb-completion $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d/
+mv completion/policyeditor.bash $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d/
+mv completion/javaws.bash $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d/
+mv completion/itweb-settings.bash $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d/
 
 # Move javaws man page to a more specific name
-mv $RPM_BUILD_ROOT/%{_mandir}/man1/javaws.1 $RPM_BUILD_ROOT/%{_mandir}/man1/javaws-itweb.1
+mv $RPM_BUILD_ROOT/%{_mandir}/man1/javaws.1 $RPM_BUILD_ROOT/%{_mandir}/man1/javaws.itweb.1
 
 # Install desktop files.
 install -d -m 755 $RPM_BUILD_ROOT%{_datadir}/{applications,pixmaps}
@@ -116,17 +147,29 @@ desktop-file-install --vendor ''\
 desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications policyeditor.desktop
 
+cp  netx.build/lib/src.zip  $RPM_BUILD_ROOT%{_datadir}/%{name}/netx.src.zip
+cp liveconnect/lib/src.zip  $RPM_BUILD_ROOT%{_datadir}/%{name}/plugin.src.zip
+
+%find_lang %{name} --all-name --with-man
 
 %check
 #make check
 
 %post
 alternatives \
-  --install %{_libdir}/mozilla/plugins/libjavaplugin.so %{javaplugin} \
-  %{_libdir}/IcedTeaPlugin.so %{priority} \
-  --slave %{_bindir}/javaws javaws %{_prefix}/bin/javaws%{binsuffix} \
-  --slave %{_mandir}/man1/javaws.1.gz javaws.1.gz \
-  %{_mandir}/man1/javaws-itweb.1.gz
+  --install %{_libdir}/mozilla/plugins/libjavaplugin.so %{javaplugin} %{_libdir}/IcedTeaPlugin.so %{priority}  \
+  --slave   %{_bindir}/javaws				javaws			%{_prefix}/bin/javaws%{binsuffix} \
+  --slave   %{_bindir}/itweb-settings			itweb-settings		%{_prefix}/bin/itweb-settings%{binsuffix} \
+  --slave   %{_bindir}/policyeditor			policyeditor		%{_prefix}/bin/policyeditor%{binsuffix} \
+  --slave   %{_bindir}/ControlPanel			ControlPanel		%{_prefix}/bin/itweb-settings%{binsuffix} \
+  --slave   %{_mandir}/man1/javaws.1.gz			javaws.1.gz		%{_mandir}/man1/javaws%{binsuffix}.1.gz \
+  --slave   %{_mandir}/man1/ControlPanel.1.gz		ControlPanel.1.gz	%{_mandir}/man1/itweb-settings.1.gz
+
+
+gconftool-2 -s  %{jnlphandler}/command  '%{_prefix}/bin/javaws%{binsuffix} %s' --type String &> /dev/null || :
+gconftool-2 -s  %{jnlphandler}/enabled  --type Boolean true &> /dev/null || :
+gconftool-2 -s %{jnlpshandler}/command '%{_prefix}/bin/javaws%{binsuffix} %s' --type String &> /dev/null || :
+gconftool-2 -s %{jnlpshandler}/enabled --type Boolean true &> /dev/null || :
 
 %posttrans
 update-desktop-database &> /dev/null || :
@@ -136,22 +179,25 @@ exit 0
 update-desktop-database &> /dev/null || :
 if [ $1 -eq 0 ]
 then
-  alternatives --remove %{javaplugin} \
-    %{_libdir}/IcedTeaPlugin.so
+  alternatives --remove %{javaplugin} %{_libdir}/IcedTeaPlugin.so
+  gconftool-2 -u  %{jnlphandler}/command &> /dev/null || :
+  gconftool-2 -u  %{jnlphandler}/enabled &> /dev/null || :
+  gconftool-2 -u %{jnlpshandler}/command &> /dev/null || :
+  gconftool-2 -u %{jnlpshandler}/enabled &> /dev/null || :
 fi
 exit 0
 
-%files
+# files -f .mfiles -f %{name}.lang
+%files -f %{name}.lang
 %defattr(-,root,root,-)
-%{_sysconfdir}/bash_completion.d/icedteaweb-completion
+%{_sysconfdir}/bash_completion.d/*
 %{_prefix}/bin/*
 %{_libdir}/IcedTeaPlugin.so
 %{_datadir}/applications/*
-%{_datadir}/%{name}
+%dir %{_datadir}/%{name}
+%{_datadir}/%{name}/*.jar
+%{_datadir}/%{name}/*.png
 %{_datadir}/man/man1/*
-%{_datadir}/man/cs/man1/*
-%{_datadir}/man/de/man1/*
-%{_datadir}/man/pl/man1/*
 %{_datadir}/pixmaps/*
 %doc NEWS README COPYING
 
@@ -160,7 +206,30 @@ exit 0
 %{_datadir}/javadoc/%{name}
 %doc COPYING
 
+%files devel
+%{_datadir}/%{name}/*.zip
+%doc COPYING
+
 %changelog
+* Wed May 23 2018 - Jiri Vanek <jvanek@redhat.com> -1.7.1-7
+- added an applied patch3, headlessCheckSoftening_rhbz1581598.patch to make healdess detection to not misinterpret on rhel 6.10
+- Resolves: rhbz#1475412
+
+* Mon May 14 2018 - Jiri Vanek <jvanek@redhat.com> -1.7.1-6
+- added an applied patch2, oracleForms.patch to make oracle forms working
+- Resolves: rhbz#1475412
+
+* Fri Mar 02 2018 - Jiri Vanek <jvanek@redhat.com> -1.7.1-5
+- added 1473-1480.patch
+- added support for javafx-desc and so allwong run of pure-javafx only applications
+- --nosecurity enhanced for possibility to skip invalid signatures
+- enhanced to allow resources to be read also from j2se/java element (OmegaT)
+- Resolves: rhbz#1475412
+
+* Mon Dec 18 2017 Jiri Vanek <jvanek@redhat.com> 1.7.1-1
+* bump to 1.7.1
+- Resolves: rhbz#1475412
+
 * Wed Feb 03 2016 Jiri Vanek <jvanek@redhat.com> 1.6.2-1
 - updated to 1.6.2
 - fixed also rhbz#1303437 - package owns /etc/bash_completion.d but it should not own it 

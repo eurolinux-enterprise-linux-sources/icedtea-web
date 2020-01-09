@@ -33,18 +33,23 @@ or based on this library.  If you modify this library, you may extend
 this exception to your version of the library, but you are not
 obligated to do so.  If you do not wish to do so, delete this
 exception statement from your version.
-*/
-
+ */
 package net.sourceforge.jnlp.util.docprovider;
 
+import java.io.BufferedReader;
 import java.io.BufferedWriter;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.OutputStreamWriter;
+import java.io.Reader;
 import java.io.Writer;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -54,6 +59,7 @@ import net.sourceforge.jnlp.config.Defaults;
 import net.sourceforge.jnlp.OptionsDefinitions;
 import net.sourceforge.jnlp.config.InfrastructureFileDescriptor;
 import net.sourceforge.jnlp.config.Setting;
+import net.sourceforge.jnlp.runtime.JNLPRuntime;
 import net.sourceforge.jnlp.runtime.Translator;
 import net.sourceforge.jnlp.util.docprovider.formatters.formatters.Formatter;
 import net.sourceforge.jnlp.util.docprovider.formatters.formatters.HtmlFormatter;
@@ -62,13 +68,16 @@ import net.sourceforge.jnlp.util.docprovider.formatters.formatters.PlainTextForm
 import net.sourceforge.jnlp.util.docprovider.formatters.formatters.ReplacingTextFormatter;
 
 public abstract class TextsProvider {
+    
+    private static File authorFileFromUserInput = null;
 
     private final String encoding;
     private final Formatter formatter;
     private final boolean forceTitles;
     protected final boolean expandVariables;
     private boolean prepared = false;
-
+    private File authorFilePath = null;
+    
     private boolean introduction = true;
     private boolean synopsis = true;
     private boolean description = true;
@@ -183,7 +192,6 @@ public abstract class TextsProvider {
             for (Map.Entry<String, Setting<String>> entry : defs) {
                 if (matchSttingsValueWithInfrastrucutreFile(entry.getValue(), f)) {
                     controlledBy = " " + Translator.R("BUTControlledBy", getFormatter().getBold(entry.getKey()));
-                    
                     break;
                 }
             }
@@ -270,13 +278,9 @@ public abstract class TextsProvider {
     public String getAuthors() {
         if (forceTitles) {
             return getFormatter().getTitle(ManFormatter.KnownSections.AUTHOR)
-                    + getFormatter().wrapParagraph(
-                            getFormatter().process(Translator.R("ITWTBdebug"))
-                            + getFormatter().getNewLine());
+                    + generateAuthorsSection(authorFilePath);
         } else {
-            return getFormatter().wrapParagraph(
-                    getFormatter().process(Translator.R("ITWTBdebug"))
-                    + getFormatter().getNewLine());
+            return generateAuthorsSection(authorFilePath);
         }
     }
 
@@ -396,10 +400,13 @@ public abstract class TextsProvider {
     }
 
     public static void main(String[] args) throws IOException {
+        // Shutdown hook from OutputController was causing hanging build on Windows. It's not used on headless.
+        JNLPRuntime.setHeadless(true);
+        
         if (args.length == 0) {
             System.out.println(" * IcedTea-Web self documentation tool list of arguments *");
-            System.out.println(" * arument version - last parameter of each command, is used when there is no internal versionknown *");
-            System.out.println(" *                 - is mandatory, but not used if real version do exists *");
+            System.out.println(" * argument version - last parameter of each command, is used when there is no internal versionknown *");
+            System.out.println(" *                  - is mandatory, but not used if real version do exists *");
             System.out.println(" * argument expand - one before last argument, false/true - is used to not/expand variables *");
             System.out.println(" * -------------------- *");
             System.out.println("all expand version - will generate all reports in theirs defaults into current directory");
@@ -408,24 +415,38 @@ public abstract class TextsProvider {
             System.out.println("man encoding targetDir expand version - will generate man documentation to target dir in desired encoding");
             System.out.println("plain targetDir maxLineWidth expand version - will generate plain text documentation to target dir in desired encoding");
             System.out.println("                                            - maxLineWidth is in <5," + Integer.MAX_VALUE + ">");
+            System.out.println("to generate informations about authors from a file, use argument '-authorFile' with path to AUTHORS file located in icedtea-web."
+                    + "\n eg. -authorFile=/home/user/icedtea-web/AUTHORS");
         } else {
-            ReplacingTextFormatter.backupVersion = args[args.length - 1];
-            boolean expand = Boolean.valueOf(args[args.length - 2]);
-            switch (args[0]) {
+            List<String> argsList = new ArrayList<>();
+            argsList.addAll(Arrays.asList(args));
+            for (String s : argsList) {
+                if (s.startsWith("-authorFile=")) {
+                    authorFileFromUserInput = new File(s.split("=")[1]);
+                    if (!authorFileFromUserInput.exists()) {
+                        throw new RuntimeException(authorFileFromUserInput.getAbsolutePath() + " does not exists");
+                    }
+                    argsList.remove(s);
+                    break;
+                }
+            }
+            ReplacingTextFormatter.backupVersion = argsList.get(argsList.size() - 1);
+            boolean expand = Boolean.valueOf(argsList.get(argsList.size() - 2));
+            switch (argsList.get(0)) {
                 case "all":
                     generateAll(new File(System.getProperty("user.dir")), expand);
                     break;
                 case "html":
-                    generateOnlineHtmlHelp(new File(args[1]), expand);
+                    generateOnlineHtmlHelp(new File(argsList.get(1)), expand);
                     break;
                 case "htmlIntro":
-                    generateItwIntro(new File(args[1]), expand);
+                    generateItwIntro(new File(argsList.get(1)), expand);
                     break;
                 case "man":
-                    generateManText(args[1], new File(args[2]), expand);
+                    generateManText(argsList.get(1), new File(argsList.get(2)), expand);
                     break;
                 case "plain":
-                    generatePlainTextDocs(new File(args[1]), Integer.valueOf(args[2]), expand);
+                    generatePlainTextDocs(new File(argsList.get(1)), Integer.valueOf(argsList.get(2)), expand);
                     break;
                 default:
                     System.out.println("unknown param");
@@ -437,6 +458,7 @@ public abstract class TextsProvider {
 
     public static void generateItwIntro(File f, boolean expand) throws IOException {
         IcedTeaWebTextsProvider itw = new IcedTeaWebTextsProvider("utf-8", new HtmlFormatter(false, true, false), false, expand);
+        //!!AUTHORS FILE IS NOT NEEDED IN THIS METHOD, AUTHORS ARE GENERATED SEPARATELY INTO ANOTHER TAB
         itw.setSeeAlso(false);
         itw.writeToFile(f);
     }
@@ -477,15 +499,15 @@ public abstract class TextsProvider {
             }
         }
         JavaWsTextsProvider javaws = new JavaWsTextsProvider(encoding, new HtmlFormatter(allowContext, allowLogo, includeXmlHeader), titles, expand);
-        javaws.writeToDir(dir);
         ItwebSettingsTextsProvider itws = new ItwebSettingsTextsProvider(encoding, new HtmlFormatter(allowContext, allowLogo, includeXmlHeader), titles, expand);
-        itws.writeToDir(dir);
         PolicyEditorTextsProvider pe = new PolicyEditorTextsProvider(encoding, new HtmlFormatter(allowContext, allowLogo, includeXmlHeader), titles, expand);
-        pe.writeToDir(dir);
         IcedTeaWebTextsProvider itw = new IcedTeaWebTextsProvider(encoding, new HtmlFormatter(allowContext, allowLogo, includeXmlHeader), titles, expand);
-        itw.writeToDir(dir);
         ItwebPluginTextProvider pl = new ItwebPluginTextProvider(encoding, new HtmlFormatter(allowContext, allowLogo, includeXmlHeader), titles, expand);
-        pl.writeToDir(dir);
+        TextsProvider[] providers = new TextsProvider[]{javaws, itws, pe, itw, pl};
+        for (TextsProvider provider : providers) {
+            provider.setAuthorFilePath(authorFileFromUserInput);
+            provider.writeToDir(dir);
+        }
 
     }
 
@@ -495,15 +517,15 @@ public abstract class TextsProvider {
 
     public static void generateManText(String encoding, File dir, boolean titles, boolean expand) throws IOException {
         JavaWsTextsProvider javaws = new JavaWsTextsProvider(encoding, new ManFormatter(), titles, expand);
-        javaws.writeToDir(dir);
         ItwebSettingsTextsProvider itws = new ItwebSettingsTextsProvider(encoding, new ManFormatter(), titles, expand);
-        itws.writeToDir(dir);
         PolicyEditorTextsProvider pe = new PolicyEditorTextsProvider(encoding, new ManFormatter(), titles, expand);
-        pe.writeToDir(dir);
         IcedTeaWebTextsProvider itw = new IcedTeaWebTextsProvider(encoding, new ManFormatter(), titles, expand);
-        itw.writeToDir(dir);
         ItwebPluginTextProvider pl = new ItwebPluginTextProvider(encoding, new ManFormatter(), titles, expand);
-        pl.writeToDir(dir);
+        TextsProvider[] providers = new TextsProvider[]{javaws, itws, pe, itw, pl};
+        for (TextsProvider provider : providers) {
+            provider.setAuthorFilePath(authorFileFromUserInput);
+            provider.writeToDir(dir);
+        }
 
     }
 
@@ -513,15 +535,15 @@ public abstract class TextsProvider {
 
     public static void generatePlainTextDocs(String encoding, File dir, String indent, int lineWidth, boolean titles, boolean expand) throws IOException {
         JavaWsTextsProvider javaws = new JavaWsTextsProvider(encoding, new PlainTextFormatter(indent, lineWidth), titles, expand);
-        javaws.writeToDir(dir);
         ItwebSettingsTextsProvider itws = new ItwebSettingsTextsProvider(encoding, new PlainTextFormatter(indent, lineWidth), titles, expand);
-        itws.writeToDir(dir);
         PolicyEditorTextsProvider pe = new PolicyEditorTextsProvider(encoding, new PlainTextFormatter(indent, lineWidth), titles, expand);
-        pe.writeToDir(dir);
         IcedTeaWebTextsProvider itw = new IcedTeaWebTextsProvider(encoding, new PlainTextFormatter(indent, lineWidth), titles, expand);
-        itw.writeToDir(dir);
         ItwebPluginTextProvider pl = new ItwebPluginTextProvider(encoding, new PlainTextFormatter(indent, lineWidth), titles, expand);
-        pl.writeToDir(dir);
+        TextsProvider[] providers = new TextsProvider[]{javaws, itws, pe, itw, pl};
+        for(TextsProvider provider : providers){
+            provider.setAuthorFilePath(authorFileFromUserInput);
+            provider.writeToDir(dir);
+        }
 
     }
 
@@ -667,6 +689,11 @@ public abstract class TextsProvider {
         this.authors = authors;
     }
 
+    public void setAuthorFilePath(File authorFilePath) {
+        this.authorFilePath = authorFilePath;
+    }
+    
+
     /**
      * @return the seeAlso
      */
@@ -691,4 +718,49 @@ public abstract class TextsProvider {
         return s;
     }
 
+    private String readAuthors(File authors) {
+        try {
+            return readAuthorsImpl(authors);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private String readAuthorsImpl(File authors) throws IOException {
+        return readAuthorsImpl(new InputStreamReader(new FileInputStream(authors), "UTF-8"));
+
+    }
+
+    String readAuthorsImpl(Reader authors) throws IOException {
+        StringBuilder sb = new StringBuilder();
+        boolean areAuthors = false;
+        BufferedReader reader = new BufferedReader(authors);
+        while (true) {
+            String line = reader.readLine();
+            if (line == null) {
+                break;
+            }
+            if (line.trim().isEmpty()) {
+                areAuthors = !areAuthors;
+            }
+            sb.append(getFormatter().process(getFormatter().getAdressLink(line)));
+            if (getFormatter() instanceof HtmlFormatter || areAuthors == false) {
+                sb.append(getFormatter().getNewLine());
+            }
+        }
+        return sb.toString();
+    }
+
+    private String generateAuthorsSection(File filePath) {
+        if (filePath == null) {
+            return getFormatter().wrapParagraph(
+                    getFormatter().process(Translator.R("ITWdocsMissingAuthors"))
+                    + getFormatter().getNewLine());
+        } else {
+            return getFormatter().wrapParagraph(
+                    getFormatter().process(readAuthors(filePath))
+                    + getFormatter().getNewLine());
+        }
+    }
 }
+

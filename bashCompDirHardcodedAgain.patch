@@ -1,0 +1,28 @@
+diff -r 13cf373ecdba -r c354ddd6de5f Makefile.am
+--- a/Makefile.am	Thu May 04 16:13:43 2017 +0200
++++ b/Makefile.am	Wed May 10 12:41:53 2017 +0200
+@@ -34,7 +34,7 @@
+ export NETX_SRCDIR = $(TOP_SRC_DIR)/netx
+ export NETX_RESOURCE_DIR=$(NETX_SRCDIR)/net/sourceforge/jnlp/resources
+ export ICONS_DEST_DIR=$(DESTDIR)$(datadir)/pixmaps
+-export BASH_CMPL_DEST_DIR=$(DESTDIR)@bashcompdir@
++export BASH_CMPL_DEST_DIR=$(DESTDIR)$(sysconfdir)/bash_completion.d
+ 
+ export WIN_ALL_DEPS=$(DESTDIR)$(prefix)/win-deps-all
+ export WIN_RUN_DEPS=$(DESTDIR)$(prefix)/win-deps-runtime
+diff -r 13cf373ecdba -r c354ddd6de5f configure.ac
+--- a/configure.ac	Thu May 04 16:13:43 2017 +0200
++++ b/configure.ac	Wed May 10 12:41:53 2017 +0200
+@@ -157,10 +157,6 @@
+   fi
+ fi
+ 
+-PKG_CHECK_VAR(bashcompdir, [bash-completion], [completionsdir], ,
+-     bashcompdir="${sysconfdir}/bash_completion.d")
+-AC_SUBST(bashcompdir)
+-
+ AC_CONFIG_FILES([jrunscript], [chmod u+x jrunscript])
+ AC_CONFIG_FILES([build.properties])
+ 
+
+

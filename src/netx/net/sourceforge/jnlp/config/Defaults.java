@@ -220,7 +220,12 @@ public class Defaults {
                         BasicValueValidators.getBooleanValidator(),
                         String.valueOf(true)
                 },
-                                {
+                {
+                        DeploymentConfiguration.KEY_HTTPS_DONT_ENFORCE,
+                        BasicValueValidators.getBooleanValidator(),
+                        String.valueOf(false)
+                },
+                {
                         DeploymentConfiguration.KEY_SECURITY_PROMPT_USER_FOR_JNLP,
                         BasicValueValidators.getBooleanValidator(),
                         String.valueOf(true)
@@ -342,12 +347,12 @@ public class Defaults {
                 {
                         DeploymentConfiguration.KEY_ENABLE_APPLICATION_LOGGING_TOFILE,
                         BasicValueValidators.getBooleanValidator(),
-                        String.valueOf(false)
+                        String.valueOf(true)
                 },
                  {
                         DeploymentConfiguration.KEY_ENABLE_LEGACY_LOGBASEDFILELOG,
                         BasicValueValidators.getBooleanValidator(),
-                        String.valueOf(true)
+                        String.valueOf(false)
                 },
                 {
                         DeploymentConfiguration.KEY_ENABLE_LOGGING_TOSTREAMS,
