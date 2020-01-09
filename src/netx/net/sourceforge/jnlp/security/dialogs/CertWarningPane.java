@@ -48,8 +48,6 @@ import java.awt.GridLayout;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.io.File;
-import java.io.FileOutputStream;
-import java.io.OutputStream;
 import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
@@ -61,7 +59,6 @@ import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JLabel;
 import javax.swing.JPanel;
-import javax.swing.JPopupMenu;
 import javax.swing.SwingConstants;
 
 import net.sourceforge.jnlp.JNLPFile;
@@ -76,7 +73,6 @@ import net.sourceforge.jnlp.security.KeyStores.Type;
 import net.sourceforge.jnlp.security.SecurityDialog;
 import net.sourceforge.jnlp.security.SecurityDialogs.AccessType;
 import net.sourceforge.jnlp.security.SecurityUtil;
-import net.sourceforge.jnlp.security.policyeditor.PolicyEditor.PolicyEditorWindow;
 import net.sourceforge.jnlp.util.FileUtils;
 import net.sourceforge.jnlp.util.logging.OutputController;
 
@@ -95,14 +91,12 @@ public class CertWarningPane extends SecurityDialogPanel {
     private final Certificate cert;
     private JCheckBox alwaysTrust;
     private final CertVerifier certVerifier;
-    private SecurityDelegate securityDelegate;
-    private JPopupMenu policyMenu;
+    private final SecurityDelegate securityDelegate;
     private JPanel topPanel, infoPanel, buttonPanel, bottomPanel;
     private JLabel topLabel, nameLabel, publisherLabel, fromLabel, bottomLabel;
     private JButton run, sandbox, advancedOptions, cancel, moreInfo;
     private boolean alwaysTrustSelected;
     private String bottomLabelWarningText;
-    private PolicyEditorWindow policyEditor = null;
 
     public CertWarningPane(SecurityDialog x, CertVerifier certVerifier, SecurityDelegate securityDelegate) {
         super(x, certVerifier);
@@ -224,7 +218,8 @@ public class CertWarningPane extends SecurityDialogPanel {
         infoPanel.add(nameLabel);
         infoPanel.add(publisherLabel);
 
-        if (!(certVerifier instanceof HttpsCertVerifier)) {
+        final boolean isHttpsCertTrustDialog = certVerifier instanceof HttpsCertVerifier;
+        if (!isHttpsCertTrustDialog) {
             infoPanel.add(fromLabel);
         }
 
@@ -233,28 +228,37 @@ public class CertWarningPane extends SecurityDialogPanel {
 
         //run and cancel buttons
         buttonPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
-        run = new JButton(R("ButRun"));
+        run = new JButton();
+        if (isHttpsCertTrustDialog) {
+            run.setText(R("ButYes"));
+        } else {
+            run.setText(R("ButRun"));
+        }
         sandbox = new JButton(R("ButSandbox"));
         advancedOptions = new TemporaryPermissionsButton(file, securityDelegate, sandbox);
-        cancel = new JButton(R("ButCancel"));
 
-        run.setToolTipText(R("CertWarnRunTip"));
+        cancel = new JButton();
+        if (isHttpsCertTrustDialog) {
+            cancel.setText(R("ButNo"));
+        } else {
+            cancel.setText(R("ButCancel"));
+        }
+
+        if (isHttpsCertTrustDialog) {
+            run.setToolTipText(R("CertWarnHTTPSAcceptTip"));
+        } else {
+            run.setToolTipText(R("CertWarnRunTip"));
+        }
         sandbox.setToolTipText(R("CertWarnSandboxTip"));
         advancedOptions.setToolTipText(R("CertWarnPolicyTip"));
-        cancel.setToolTipText(R("CertWarnCancelTip"));
+        if (isHttpsCertTrustDialog) {
+            cancel.setToolTipText(R("CertWarnHTTPSRejectTip"));
+        } else {
+            cancel.setToolTipText(R("CertWarnCancelTip"));
+        }
 
         alwaysTrust.addActionListener(new ButtonDisableListener(sandbox));
-        int buttonWidth = Math.max(run.getMinimumSize().width,
-                sandbox.getMinimumSize().width);
-        buttonWidth = Math.max(buttonWidth, cancel.getMinimumSize().width);
-        int buttonHeight = run.getMinimumSize().height;
-        Dimension d = new Dimension(buttonWidth, buttonHeight);
-
-        run.setPreferredSize(d);
-        sandbox.setPreferredSize(d);
-        advancedOptions.setPreferredSize(new Dimension(advancedOptions.getMinimumSize().width, buttonHeight));
-        cancel.setPreferredSize(d);
-
+ 
         sandbox.setEnabled(!alwaysTrust.isSelected());
 
         run.addActionListener(createSetValueListener(parent, 0));
@@ -266,11 +270,12 @@ public class CertWarningPane extends SecurityDialogPanel {
 
         initialFocusComponent = cancel;
         buttonPanel.add(run);
-        // file will be null iff this dialog is being called from VariableX509TrustManager.
-        // In this case, the "sandbox" button does not make any sense, as we are asking
-        // the user if they trust some certificate that is not being used to sign an app.
-        // Since there is no app, there is nothing to run sandboxed.
-        if (file != null) {
+        // Only iff this dialog is being invoked by VariableX509TrustManager.
+        // In this case, the "sandbox" button and temporary permissions do not make any sense,
+        // as we are asking the user if they trust some certificate that is not being used to sign an app
+        // (eg "do you trust this certificate presented for the HTTPS connection to the applet's host site")
+        // Since this dialog isn't talking about an applet/application, there is nothing to run sandboxed.
+        if (!isHttpsCertTrustDialog) {
             buttonPanel.add(sandbox);
             buttonPanel.add(advancedOptions);
         }
@@ -332,17 +337,11 @@ public class CertWarningPane extends SecurityDialogPanel {
                     KeyStore ks = KeyStores.getKeyStore(Level.USER, Type.CERTS);
                     X509Certificate c = (X509Certificate) parent.getCertVerifier().getPublisher(null);
                     CertificateUtils.addToKeyStore(c, ks);
-                    File keyStoreFile = new File(KeyStores.getKeyStoreLocation(Level.USER, Type.CERTS));
+                    File keyStoreFile = KeyStores.getKeyStoreLocation(Level.USER, Type.CERTS).getFile();
                     if (!keyStoreFile.isFile()) {
                         FileUtils.createRestrictedFile(keyStoreFile, true);
                     }
-
-                    OutputStream os = new FileOutputStream(keyStoreFile);
-                    try {
-                        ks.store(os, KeyStores.getPassword());
-                    } finally {
-                        os.close();
-                    }
+                    SecurityUtil.storeKeyStore(ks, keyStoreFile);
                     OutputController.getLogger().log("certificate is now permanently trusted");
                 } catch (Exception ex) {
                     // TODO: Let NetX show a dialog here notifying user

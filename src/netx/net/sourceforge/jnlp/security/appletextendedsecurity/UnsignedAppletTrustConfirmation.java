@@ -48,8 +48,8 @@ import net.sourceforge.jnlp.JARDesc;
 import net.sourceforge.jnlp.JNLPFile;
 import net.sourceforge.jnlp.LaunchException;
 import net.sourceforge.jnlp.PluginBridge;
-import net.sourceforge.jnlp.runtime.JNLPRuntime;
 import net.sourceforge.jnlp.runtime.JNLPClassLoader.SecurityDelegate;
+import net.sourceforge.jnlp.runtime.JNLPRuntime;
 import net.sourceforge.jnlp.security.dialogs.apptrustwarningpanel.AppTrustWarningPanel.AppSigningWarningAction;
 import net.sourceforge.jnlp.security.CertVerifier;
 import net.sourceforge.jnlp.security.SecurityDialogs;
@@ -78,37 +78,45 @@ public class UnsignedAppletTrustConfirmation {
      * and then the global policy.
      * 
      * @param file the plugin file
+     * @param id of wonted  action
      * @return the remembered decision
      */
-    public static ExecuteAppletAction getStoredAction(JNLPFile file) {
+    public static UnsignedAppletActionEntry getStoredEntry(JNLPFile file, int id) {
         UnsignedAppletActionStorage userActionStorage = securitySettings.getUnsignedAppletActionCustomStorage();
         UnsignedAppletActionStorage globalActionStorage = securitySettings.getUnsignedAppletActionGlobalStorage();
 
-        UnsignedAppletActionEntry globalEntry = getMatchingItem(globalActionStorage, file);
-        UnsignedAppletActionEntry userEntry = getMatchingItem(userActionStorage, file);
+        UnsignedAppletActionEntry globalEntry = getMatchingItem(globalActionStorage, file, id);
+        UnsignedAppletActionEntry userEntry = getMatchingItem(userActionStorage, file, id);
 
-        ExecuteAppletAction globalAction = globalEntry == null ? null : globalEntry.getUnsignedAppletAction();
-        ExecuteAppletAction userAction = userEntry == null ? null : userEntry.getUnsignedAppletAction();
+        ExecuteAppletAction globalAction = globalEntry == null ? null : globalEntry.getAppletSecurityActions().getAction(id);
+        ExecuteAppletAction userAction = userEntry == null ? null : userEntry.getAppletSecurityActions().getAction(id);
 
         if (userAction == ExecuteAppletAction.ALWAYS || userAction == ExecuteAppletAction.NEVER) {
-            return userAction;
+            return userEntry;
         } else if (globalAction == ExecuteAppletAction.ALWAYS || globalAction == ExecuteAppletAction.NEVER) {
-            return globalAction;
+            return globalEntry;
         } else {
-            return userAction;
+            return userEntry;
         }
     }
+    public static ExecuteAppletAction getStoredAction(JNLPFile file, int id) {
+        UnsignedAppletActionEntry x = getStoredEntry(file, id);
+        if (x != null) {
+            return x.getAppletSecurityActions().getAction(id);
+        }
+        return null;
+    }
 
-    private static UnsignedAppletActionEntry getMatchingItem(UnsignedAppletActionStorage actionStorage, JNLPFile file) {
+    private static UnsignedAppletActionEntry getMatchingItem(UnsignedAppletActionStorage actionStorage, JNLPFile file, int id) {
         return actionStorage.getMatchingItem(
                 UrlUtils.normalizeUrlAndStripParams(file.getSourceLocation(), true /* encode local files */).toString(), 
-                UrlUtils.normalizeUrlAndStripParams(file.getCodeBase(), true /* encode local files */).toString(), 
-                toRelativePaths(getJars(file), file.getCodeBase().toString()));
+                UrlUtils.normalizeUrlAndStripParams(file.getNotNullProbalbeCodeBase(), true /* encode local files */).toString(), 
+                toRelativePaths(getJars(file), file.getNotNullProbalbeCodeBase().toExternalForm()), id);
     }
 
     /* Extract the archives as relative paths */
     static List<String> toRelativePaths(List<String> paths, String rootPath) {
-        List<String> fileNames = new ArrayList<String>();
+        List<String> fileNames = new ArrayList<>();
         for (String path : paths) {
             if (path.startsWith(rootPath)) {
                 fileNames.add(path.substring(rootPath.length()));
@@ -119,36 +127,39 @@ public class UnsignedAppletTrustConfirmation {
         return fileNames;
     }
 
-    private static void updateAppletAction(JNLPFile file, ExecuteAppletAction behaviour, boolean rememberForCodeBase) {
+    public static void updateAppletAction(JNLPFile file, ExecuteAppletAction behaviour, boolean rememberForCodeBase, int id) {
         UnsignedAppletActionStorage userActionStorage = securitySettings.getUnsignedAppletActionCustomStorage();
 
         userActionStorage.lock(); // We should ensure this operation is atomic
         try {
-            UnsignedAppletActionEntry oldEntry = getMatchingItem(userActionStorage, file);
+            UnsignedAppletActionEntry oldEntry = getMatchingItem(userActionStorage, file, id);
 
+            URL codebase = UrlUtils.normalizeUrlAndStripParams(file.getNotNullProbalbeCodeBase(), true /* encode local files */);
+            URL documentbase = UrlUtils.normalizeUrlAndStripParams(file.getSourceLocation(), true /* encode local files */);
+
+            /* Else, create a new entry */
+            UrlRegEx codebaseRegex = UrlRegEx.quote(codebase.toExternalForm());
+            UrlRegEx documentbaseRegex = UrlRegEx.quoteAndStar(UrlUtils.stripFile(documentbase)); // Match any from codebase and sourceFile "base"
+            List<String> archiveMatches = null; // Match any from codebase
+
+            if (!rememberForCodeBase) { 
+                documentbaseRegex = UrlRegEx.quote(documentbase.toExternalForm()); // Match only this applet
+                archiveMatches = toRelativePaths(getJars(file), file.getNotNullProbalbeCodeBase().toString()); // Match only this applet
+            }
+            
             /* Update, if entry exists */
             if (oldEntry != null) {
-                oldEntry.setUnsignedAppletAction(behaviour);
+                oldEntry.getAppletSecurityActions().setAction(id, behaviour);
                 oldEntry.setTimeStamp(new Date());
+                oldEntry.setDocumentBase(documentbaseRegex);
+                oldEntry.setCodeBase(codebaseRegex);
+                oldEntry.setArchives(archiveMatches);
                 userActionStorage.update(oldEntry);
                 return;
             }
 
-            URL codebase = UrlUtils.normalizeUrlAndStripParams(file.getCodeBase(), true /* encode local files */);
-            URL documentbase = UrlUtils.normalizeUrlAndStripParams(file.getSourceLocation(), true /* encode local files */);
-
-            /* Else, create a new entry */
-            UrlRegEx codebaseRegex = new UrlRegEx("\\Q" + codebase + "\\E");
-            UrlRegEx documentbaseRegex = new UrlRegEx(".*"); // Match any from codebase
-            List<String> archiveMatches = null; // Match any from codebase
-
-            if (!rememberForCodeBase) { 
-                documentbaseRegex = new UrlRegEx("\\Q" + documentbase + "\\E"); // Match only this applet
-                archiveMatches = toRelativePaths(getJars(file), file.getCodeBase().toString()); // Match only this applet
-            }
-
             UnsignedAppletActionEntry entry = new UnsignedAppletActionEntry(
-                    behaviour, 
+                    AppletSecurityActions.fromAction(id, behaviour), 
                     new Date(),
                     documentbaseRegex, 
                     codebaseRegex,
@@ -175,17 +186,17 @@ public class UnsignedAppletTrustConfirmation {
 
     public static void checkUnsignedWithUserIfRequired(JNLPFile file) throws LaunchException {
 
-        if (unsignedAppletsAreForbidden()) {
+        if (unsignedAppletsAreForbidden() || JNLPRuntime.isTrustNone()) {
             OutputController.getLogger().log(OutputController.Level.ERROR_DEBUG, "Not running unsigned applet at " + file.getCodeBase() +" because unsigned applets are disallowed by security policy.");
             throw new LaunchException(file, null, R("LSFatal"), R("LCClient"), R("LUnsignedApplet"), R("LUnsignedAppletPolicyDenied"));
         }
 
-        if (!unsignedConfirmationIsRequired()) {
+        if (!unsignedConfirmationIsRequired() || JNLPRuntime.isTrustAll()) {
             OutputController.getLogger().log(OutputController.Level.ERROR_DEBUG, "Running unsigned applet at " + file.getCodeBase() +" does not require confirmation according to security policy.");
             return;
         }
 
-        ExecuteAppletAction storedAction = getStoredAction(file);
+        ExecuteAppletAction storedAction = getStoredAction(file, AppletSecurityActions.UNSIGNED_APPLET_ACTION);
         OutputController.getLogger().log(OutputController.Level.ERROR_DEBUG, "Stored action for unsigned applet at " + file.getCodeBase() +" was " + storedAction);
 
         boolean appletOK;
@@ -202,7 +213,7 @@ public class UnsignedAppletTrustConfirmation {
             appletOK = (executeAction == ExecuteAppletAction.YES || executeAction == ExecuteAppletAction.ALWAYS);
 
             if (executeAction != null) {
-                updateAppletAction(file, executeAction, warningResponse.rememberForCodeBase());
+                updateAppletAction(file, executeAction, warningResponse.rememberForCodeBase(), AppletSecurityActions.UNSIGNED_APPLET_ACTION);
             }
 
             OutputController.getLogger().log(OutputController.Level.ERROR_DEBUG, "Decided action for unsigned applet at " + file.getCodeBase() +" was " + executeAction);
@@ -222,13 +233,17 @@ public class UnsignedAppletTrustConfirmation {
             securityDelegate.setRunInSandbox();
             return;
         }
+        if (JNLPRuntime.isTrustAll()) {
+            OutputController.getLogger().log(OutputController.Level.ERROR_DEBUG, "Running partially signed applet at " + file.getCodeBase() + " due to -Xtrustall flag");
+            return;
+        }
 
         if (!unsignedConfirmationIsRequired()) {
             OutputController.getLogger().log(OutputController.Level.ERROR_DEBUG, "Running partially signed applet at " + file.getCodeBase() + " does not require confirmation according to security policy.");
             return;
         }
 
-        ExecuteAppletAction storedAction = getStoredAction(file);
+        ExecuteAppletAction storedAction = getStoredAction(file, AppletSecurityActions.UNSIGNED_APPLET_ACTION);
         OutputController.getLogger().log(OutputController.Level.ERROR_DEBUG, "Stored action for partially signed applet at " + file.getCodeBase() + " was " + storedAction);
 
         boolean appletOK;
@@ -250,7 +265,7 @@ public class UnsignedAppletTrustConfirmation {
                     || executeAction == ExecuteAppletAction.SANDBOX);
 
             if (executeAction != null) {
-                updateAppletAction(file, executeAction, warningResponse.rememberForCodeBase());
+                updateAppletAction(file, executeAction, warningResponse.rememberForCodeBase(),AppletSecurityActions.UNSIGNED_APPLET_ACTION);
             }
 
             OutputController.getLogger().log(OutputController.Level.ERROR_DEBUG, "Decided action for unsigned applet at " + file.getCodeBase() + " was " + executeAction);

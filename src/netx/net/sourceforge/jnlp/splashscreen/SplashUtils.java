@@ -94,7 +94,7 @@ public class SplashUtils {
         if (ae == null) {
             return;
         }
-        SplashController p = ae.getSplashControler();
+        SplashController p = ae.getSplashController();
         showError(ex, p);
     }
 
@@ -171,7 +171,7 @@ public class SplashUtils {
      * @param loadingException
      * @param isError
      */
-    static SplashPanel getSplashScreen(int width, int height, SplashUtils.SplashReason splashReason, Throwable loadingException, boolean isError) {
+    public static SplashPanel getSplashScreen(int width, int height, SplashUtils.SplashReason splashReason, Throwable loadingException, boolean isError) {
         String splashEnvironmetVar = null;
         String pluginSplashEnvironmetVar = null;
         try {

@@ -62,8 +62,7 @@ exception statement from your version. */
 
 package sun.applet;
 
-import static net.sourceforge.jnlp.runtime.Translator.R;
-
+import com.sun.jndi.toolkit.url.UrlUtil;
 import java.applet.Applet;
 import java.applet.AppletContext;
 import java.applet.AudioClip;
@@ -91,7 +90,6 @@ import java.security.AllPermission;
 import java.security.PrivilegedAction;
 import java.util.Enumeration;
 import java.util.HashMap;
-import java.util.Hashtable;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Vector;
@@ -100,26 +98,26 @@ import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.locks.Condition;
 import java.util.concurrent.locks.ReentrantLock;
-
 import javax.swing.SwingUtilities;
-
 import net.sourceforge.jnlp.LaunchException;
 import net.sourceforge.jnlp.NetxPanel;
+import net.sourceforge.jnlp.PluginBridge;
 import net.sourceforge.jnlp.PluginParameters;
 import net.sourceforge.jnlp.runtime.JNLPClassLoader;
+import net.sourceforge.jnlp.runtime.JNLPRuntime;
+import static net.sourceforge.jnlp.runtime.Translator.R;
+
+import net.sourceforge.jnlp.security.ConnectionFactory;
 import net.sourceforge.jnlp.security.appletextendedsecurity.AppletSecurityLevel;
 import net.sourceforge.jnlp.security.appletextendedsecurity.AppletStartupSecuritySettings;
 import net.sourceforge.jnlp.splashscreen.SplashController;
 import net.sourceforge.jnlp.splashscreen.SplashPanel;
 import net.sourceforge.jnlp.splashscreen.SplashUtils;
+import net.sourceforge.jnlp.util.UrlUtils;
+import net.sourceforge.jnlp.util.logging.OutputController;
 import sun.awt.AppContext;
 import sun.awt.SunToolkit;
 import sun.awt.X11.XEmbeddedFrame;
-import sun.misc.Ref;
-
-import com.sun.jndi.toolkit.url.UrlUtil;
-import net.sourceforge.jnlp.runtime.JNLPRuntime;
-import net.sourceforge.jnlp.util.logging.OutputController;
 
 /*
  */
@@ -151,8 +149,8 @@ public class PluginAppletViewer extends XEmbeddedFrame
     private int identifier;
 
     // Instance identifier -> PluginAppletViewer object.
-    private static ConcurrentMap<Integer, PluginAppletViewer> applets =
-            new ConcurrentHashMap<Integer, PluginAppletViewer>();
+    private static final ConcurrentMap<Integer, PluginAppletViewer> applets =
+            new ConcurrentHashMap<>();
     private static final ReentrantLock appletsLock = new ReentrantLock();
     // CONDITION PREDICATE: !applets.containsKey(identifier)
     private static final Condition appletAdded = appletsLock.newCondition();
@@ -161,8 +159,8 @@ public class PluginAppletViewer extends XEmbeddedFrame
 
     private static PluginCallRequestFactory requestFactory;
 
-    private static ConcurrentMap<Integer, PAV_INIT_STATUS> status =
-            new ConcurrentHashMap<Integer, PAV_INIT_STATUS>();
+    private static final ConcurrentMap<Integer, PAV_INIT_STATUS> status =
+            new ConcurrentHashMap<>();
     private static final ReentrantLock statusLock = new ReentrantLock();
     // CONDITION PREDICATE: !status.get(identifier).equals(PAV_INIT_STATUS.INIT_COMPLETE)
     private static final Condition initComplete = statusLock.newCondition();
@@ -223,9 +221,12 @@ public class PluginAppletViewer extends XEmbeddedFrame
         }
 
         appletsLock.lock();
-        applets.put(identifier, appletFrame);
-        appletAdded.signalAll();
-        appletsLock.unlock();
+        try {
+            applets.put(identifier, appletFrame);
+            appletAdded.signalAll();
+        } finally {
+            appletsLock.unlock();
+        }
 
         PluginDebug.debug(panel, " framed");
         return appletFrame;
@@ -365,8 +366,11 @@ public class PluginAppletViewer extends XEmbeddedFrame
             AppletPanel src = (AppletPanel) evt.getSource();
 
             panelLock.lock();
-            panelLive.signalAll();
-            panelLock.unlock();
+            try {
+                panelLive.signalAll();
+            } finally {
+                panelLock.unlock();
+            }
             switch (evt.getID()) {
                 case AppletPanel.APPLET_RESIZE: {
                     if (src != null) {
@@ -470,36 +474,40 @@ public class PluginAppletViewer extends XEmbeddedFrame
                             "Params = ", paramString);
         JNLPRuntime.saveHistory(documentBase);
 
-        PluginAppletPanelFactory factory = new PluginAppletPanelFactory();
         AppletMessageHandler amh = new AppletMessageHandler("appletviewer");
         URL url = new URL(documentBase);
-        URLConnection conn = url.openConnection();
+        URLConnection conn = ConnectionFactory.getConnectionFactory().openConnection(url);
         /* The original URL may have been redirected - this
          * sets it to whatever URL/codebase we ended up getting
          */
         url = conn.getURL();
+        ConnectionFactory.getConnectionFactory().disconnect(conn);
 
         PluginParameters params = new PluginParameterParser().parse(width, height, paramString);
 
-        // Let user know we are starting up
-        streamhandler.write("instance " + identifier + " status " + amh.getMessage("status.start"));
-        factory.createPanel(streamhandler, identifier, handle, url, params);
+       // Let user know we are starting up
+       streamhandler.write("instance " + identifier + " status " + amh.getMessage("status.start"));
+       initialize(params, handle, url, identifier, null);
+    }
+    
+    public static AppletPanel initialize(PluginParameters params, long handle, URL url, int identifier, PluginBridge pb) {
+        PluginAppletPanelFactory factory = new PluginAppletPanelFactory();
+        AppletPanel p = factory.createPanel(streamhandler, identifier, handle, url, params, pb);
 
         long maxTimeToSleep = APPLET_TIMEOUT;
         appletsLock.lock();
         try {
-            while (!applets.containsKey(identifier) &&
-                    maxTimeToSleep > 0) { // Map is populated only by reFrame
+            while (!applets.containsKey(identifier)
+                    && maxTimeToSleep > 0) { // Map is populated only by reFrame
                 maxTimeToSleep -= waitTillTimeout(appletsLock, appletAdded,
-                                                  maxTimeToSleep);
+                        maxTimeToSleep);
             }
-        }
-        finally {
+        } finally {
             appletsLock.unlock();
         }
 
         // If wait exceeded maxWait, we timed out. Throw an exception
-        if (maxTimeToSleep <= 0)  {
+        if (maxTimeToSleep <= 0) {
             // Caught in handleMessage
             throw new RuntimeException("Applet initialization timeout");
         }
@@ -511,16 +519,20 @@ public class PluginAppletViewer extends XEmbeddedFrame
         waitForAppletInit(applets.get(identifier).panel);
 
         // Should we proceed with reframing?
-         PluginDebug.debug("Init complete");
+        PluginDebug.debug("Init complete");
 
         if (updateStatus(identifier, PAV_INIT_STATUS.REFRAME_COMPLETE).equals(PAV_INIT_STATUS.INACTIVE)) {
             destroyApplet(identifier);
-            return;
+            return null;
         }
+        return p;
     }
 
     /**
      * Handle an incoming message from the plugin.
+     * @param identifier id of plugin
+     * @param reference reference id of message
+     * @param message text itself
      */
     public static void handleMessage(int identifier, int reference, String message) {
 
@@ -598,12 +610,14 @@ public class PluginAppletViewer extends XEmbeddedFrame
             }
         }
 
-        // Else set to given status
 
         statusLock.lock();
-        status.put(identifier, newStatus);
-        initComplete.signalAll();
-        statusLock.unlock();
+        try {
+            status.put(identifier, newStatus);
+            initComplete.signalAll();
+        } finally {
+            statusLock.unlock();
+        }
 
         return prev;
     }
@@ -781,7 +795,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
      * Methods for java.applet.AppletContext
      */
 
-    private static Map<URL, AudioClip> audioClips = new HashMap<URL, AudioClip>();
+    final private static Map<URL, AudioClip> audioClips = new HashMap<>();
 
     /**
      * Get an audio clip.
@@ -798,7 +812,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
         }
     }
 
-    private static Map<URL, AppletImageRef> imageRefs = new HashMap<URL, AppletImageRef>();
+    final private static Map<URL, AppletImageRef> imageRefs = new HashMap<>();
 
     /**
      * Get an image.
@@ -815,7 +829,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
     /**
      * Get an image ref.
      */
-    private synchronized Ref getCachedImageRef(URL url) {
+    private synchronized AppletImageRef getCachedImageRef(URL url) {
         PluginDebug.debug("getCachedImageRef() searching for ", url);
 
         try {
@@ -865,7 +879,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
         imageRefs.clear();
     }
 
-    private static Vector<NetxPanel> appletPanels = new Vector<NetxPanel>();
+    final private static Vector<NetxPanel> appletPanels = new Vector<>();
 
     /**
      * Get an applet by name.
@@ -874,7 +888,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
     public Applet getApplet(String name) {
         name = name.toLowerCase();
         SocketPermission panelSp =
-                new SocketPermission(panel.getCodeBase().getHost(), "connect");
+                new SocketPermission(UrlUtils.getHostAndPort(panel.getCodeBase()), "connect");
         synchronized(appletPanels) {
             for (Enumeration<NetxPanel> e = appletPanels.elements(); e.hasMoreElements();) {
                 AppletPanel p = e.nextElement();
@@ -886,7 +900,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
                         p.getDocumentBase().equals(panel.getDocumentBase())) {
 
                     SocketPermission sp =
-                        new SocketPermission(p.getCodeBase().getHost(), "connect");
+                        new SocketPermission(UrlUtils.getHostAndPort(p.getCodeBase()), "connect");
 
                     if (panelSp.implies(sp)) {
                         return p.applet;
@@ -905,7 +919,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
     public Enumeration<Applet> getApplets() {
         Vector<Applet> v = new Vector<Applet>();
         SocketPermission panelSp =
-                new SocketPermission(panel.getCodeBase().getHost(), "connect");
+                new SocketPermission(UrlUtils.getHostAndPort(panel.getCodeBase()), "connect");
 
         synchronized(appletPanels) {
             for (Enumeration<NetxPanel> e = appletPanels.elements(); e.hasMoreElements();) {
@@ -913,7 +927,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
                 if (p.getDocumentBase().equals(panel.getDocumentBase())) {
 
                     SocketPermission sp =
-                        new SocketPermission(p.getCodeBase().getHost(), "connect");
+                        new SocketPermission(UrlUtils.getHostAndPort(p.getCodeBase()), "connect");
                     if (panelSp.implies(sp)) {
                         v.addElement(p.applet);
                     }
@@ -1369,7 +1383,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
     /**
      * System parameters.
      */
-    static Hashtable<String, String> systemParam = new Hashtable<String, String>();
+    private final static Map<String, String> systemParam = new HashMap<>();
 
     static {
         systemParam.put("codebase", "codebase");
@@ -1412,7 +1426,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
         panel.sendEvent(AppletPanel.APPLET_DISPOSE);
 
         /**
-         * Fixed #4501142: Classlaoder sharing policy doesn't
+         * Fixed #4501142: Classloader sharing policy doesn't
          * take "archive" into account. This will be overridden
          * by Java Plug-in.         [stanleyh]
          */
@@ -1536,6 +1550,7 @@ public class PluginAppletViewer extends XEmbeddedFrame
 
     /**
      * How many applets are running?
+     * @return number of applets run in this JVM
      */
 
     public static int countApplets() {
@@ -1547,8 +1562,9 @@ public class PluginAppletViewer extends XEmbeddedFrame
         SecurityManager security = System.getSecurityManager();
         if (security != null) {
             try {
-                java.security.Permission perm =
-                        url.openConnection().getPermission();
+                URLConnection conn = ConnectionFactory.getConnectionFactory().openConnection(url);
+                java.security.Permission perm = conn.getPermission();
+                ConnectionFactory.getConnectionFactory().disconnect(conn);
                 if (perm != null) {
                     security.checkPermission(perm);
                 }

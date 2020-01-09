@@ -48,7 +48,7 @@ public class SecurityDescTest {
     public void testNotNullJnlpFile() throws Exception {
         Throwable t = null;
         try {
-            new SecurityDesc(new DummyJNLPFile(), SecurityDesc.SANDBOX_PERMISSIONS, "hey!");
+            new SecurityDesc(new DummyJNLPFile(), SecurityDesc.SANDBOX_PERMISSIONS, null);
         } catch (Exception ex) {
             t = ex;
         }
@@ -57,7 +57,7 @@ public class SecurityDescTest {
 
     @Test(expected = NullPointerException.class)
     public void testNullJnlpFile() throws Exception {
-        new SecurityDesc(null, SecurityDesc.SANDBOX_PERMISSIONS, "hey!");
+        new SecurityDesc(null, SecurityDesc.SANDBOX_PERMISSIONS, null);
     }
 
     @Test
@@ -112,7 +112,7 @@ public class SecurityDescTest {
     }
 
     @Test
-    public void testGetHostWithSpecifiedPortWithUserInfoWi() throws Exception {
+    public void testGetHostWithSpecifiedPortWithUserInfo() throws Exception {
         final URI codebase = new URI("http://user:password@example.com");
         final URI expected = new URI("http://user:password@example.com:80");
         assertEquals(expected, SecurityDesc.getHostWithSpecifiedPort(codebase, 80));

@@ -16,6 +16,8 @@
 
 package net.sourceforge.jnlp.runtime;
 
+import static net.sourceforge.jnlp.runtime.Translator.R;
+
 import java.awt.EventQueue;
 import java.io.File;
 import java.io.FileInputStream;
@@ -34,9 +36,9 @@ import java.security.AllPermission;
 import java.security.KeyStore;
 import java.security.Policy;
 import java.security.Security;
-import java.text.MessageFormat;
+import java.text.DateFormat;
+import java.util.Date;
 import java.util.List;
-import java.util.ResourceBundle;
 
 import javax.jnlp.ServiceManager;
 import javax.naming.ConfigurationException;
@@ -59,14 +61,17 @@ import net.sourceforge.jnlp.cache.DefaultDownloadIndicator;
 import net.sourceforge.jnlp.cache.DownloadIndicator;
 import net.sourceforge.jnlp.cache.UpdatePolicy;
 import net.sourceforge.jnlp.config.DeploymentConfiguration;
+import net.sourceforge.jnlp.config.PathsAndFiles;
 import net.sourceforge.jnlp.security.JNLPAuthenticator;
 import net.sourceforge.jnlp.security.KeyStores;
 import net.sourceforge.jnlp.security.SecurityDialogMessageHandler;
+import net.sourceforge.jnlp.security.SecurityUtil;
 import net.sourceforge.jnlp.services.XServiceManagerStub;
+import net.sourceforge.jnlp.util.BasicExceptionDialog;
 import net.sourceforge.jnlp.util.FileUtils;
 import net.sourceforge.jnlp.util.logging.JavaConsole;
-import net.sourceforge.jnlp.util.logging.OutputController;
 import net.sourceforge.jnlp.util.logging.LogConfig;
+import net.sourceforge.jnlp.util.logging.OutputController;
 import sun.net.www.protocol.jar.URLJarFile;
 
 /**
@@ -90,10 +95,6 @@ import sun.net.www.protocol.jar.URLJarFile;
  */
 public class JNLPRuntime {
 
-    static {
-        loadResources();
-    }
-
     /**
      * java-abrt-connector can print out specific application String method, it is good to save visited urls for reproduce purposes.
      * For javaws we can read the destination jnlp from commandline
@@ -101,9 +102,6 @@ public class JNLPRuntime {
      * have caused the crash. Thats why the individual urls are added, not replaced.
      */
     private static String history = "";
-
-    /** the localized resource strings */
-    private static ResourceBundle resources;
 
     /** the security manager */
     private static JNLPSecurityManager security;
@@ -154,6 +152,9 @@ public class JNLPRuntime {
 
     /** all security dialogs will be consumed and pretented as being verified by user and allowed.*/
     private static boolean trustAll=false;
+    
+    /** flag keeping rest of jnlpruntime live that javaws was lunched as -html */
+    private static boolean html=false;
 
     /** all security dialogs will be consumed and we will pretend the Sandbox option was chosen */
     private static boolean trustNone = false;
@@ -187,6 +188,7 @@ public class JNLPRuntime {
      * Returns whether the JNLP runtime environment has been
      * initialized. Once initialized, some properties such as the
      * base directory cannot be changed. Before
+     * @return whether this runtime was already initialilsed
      */
     public static boolean isInitialized() {
         return initialized;
@@ -229,9 +231,8 @@ public class JNLPRuntime {
                 //where deployment.system.config points is not readable
                 throw new RuntimeException(getConfiguration().getLoadingException());
             }
-            OutputController.getLogger().log(OutputController.Level.WARNING_ALL, getMessage("RConfigurationError")+": "+getConfiguration().getLoadingException().getMessage());
+            OutputController.getLogger().log(OutputController.Level.WARNING_ALL, R("RConfigurationError")+": "+getConfiguration().getLoadingException().getMessage());
         }
-        KeyStores.setConfiguration(getConfiguration());
 
         isWebstartApplication = isApplication;
 
@@ -274,7 +275,7 @@ public class JNLPRuntime {
             SSLContext context = SSLContext.getInstance("SSL");
             KeyStore ks = KeyStores.getKeyStore(KeyStores.Level.USER, KeyStores.Type.CLIENT_CERTS);
             KeyManagerFactory kmf = KeyManagerFactory.getInstance("SunX509");
-            kmf.init(ks, KeyStores.getPassword());
+            SecurityUtil.initKeyManagerFactory(kmf, ks);
             TrustManager[] trust = new TrustManager[] { getSSLSocketTrustManager() };
             context.init(kmf.getKeyManagers(), trust, null);
             sslSocketFactory = context.getSocketFactory();
@@ -316,7 +317,7 @@ public class JNLPRuntime {
         try {
 
             Class<?> trustManagerClass;
-            Constructor<?> tmCtor = null;
+            Constructor<?> tmCtor;
 
             if (System.getProperty("java.version").startsWith("1.6")) { // Java 6
                 try {
@@ -387,10 +388,10 @@ public class JNLPRuntime {
     }
 
 
-    
-     
-    
-    
+    public static void setOfflineForced(boolean b) {
+        offlineForced = b;
+        OutputController.getLogger().log(OutputController.Level.MESSAGE_DEBUG, "Forcing of offline set to: " + offlineForced);
+    }
 
     public static boolean isOfflineForced() {
         return offlineForced;
@@ -421,18 +422,23 @@ public class JNLPRuntime {
         if (onlineDetected != null) {
             return;
         }
-        try {
-            if (location.getProtocol().equals("file")) {
-                return;
-            }
-            //Checks the offline/online status of the system.
-            InetAddress.getByName(location.getHost());
-        } catch (UnknownHostException ue) {
-            OutputController.getLogger().log(OutputController.Level.ERROR_ALL, "The host of " + location.toExternalForm() + " file should be located seems down, or you are simply offline.");
-            JNLPRuntime.setOnlineDetected(false);
-            return;
+
+        JNLPRuntime.setOnlineDetected(isConnectable(location));
+    }
+
+    public static boolean isConnectable(URL location) {
+        if (location.getProtocol().equals("file")) {
+            return true;
         }
-        setOnlineDetected(true);
+
+        try {
+            InetAddress.getByName(location.getHost());
+        } catch (UnknownHostException e) {
+            OutputController.getLogger().log(OutputController.Level.ERROR_ALL, "The host of " + location.toExternalForm() + " file seems down, or you are simply offline.");
+            return false;
+        }
+
+        return true;
     }
    
     /**
@@ -451,16 +457,16 @@ public class JNLPRuntime {
                 config.load();
                 config.copyTo(System.getProperties());
             } catch (ConfigurationException ex) {
-                OutputController.getLogger().log(OutputController.Level.MESSAGE_ALL, Translator.R("RConfigurationError"));
+                OutputController.getLogger().log(OutputController.Level.MESSAGE_ALL, R("RConfigurationError"));
                 //mark this exceptionas we can die on it later
                 config.setLoadingException(ex);
                 //to be sure - we MUST die - http://docs.oracle.com/javase/6/docs/technotes/guides/deployment/deployment-guide/properties.html
             }catch(Exception t){
                 //all exceptions are causing InstantiatizationError so this do it much more readble
                 OutputController.getLogger().log(OutputController.Level.ERROR_ALL, t);
-                OutputController.getLogger().log(OutputController.Level.WARNING_ALL, Translator.R("RFailingToDefault"));
+                OutputController.getLogger().log(OutputController.Level.WARNING_ALL, R("RFailingToDefault"));
                 if (!JNLPRuntime.isHeadless()){
-                    JOptionPane.showMessageDialog(null, getMessage("RFailingToDefault")+"\n"+t.toString());
+                    JOptionPane.showMessageDialog(null, R("RFailingToDefault")+"\n"+t.toString());
                 }
                 //try to survive this unlikely exception
                 config.resetToDefaults();
@@ -482,7 +488,7 @@ public class JNLPRuntime {
     }
 
     /**
-     * Returns true if a webstart application has been initialized, and false
+     * @return true if a webstart application has been initialized, and false
      * for a plugin applet.
      */
     public static boolean isWebstartApplication() {
@@ -490,7 +496,7 @@ public class JNLPRuntime {
     }
 
     /**
-     * Returns whether the JNLP client will use any AWT/Swing
+     * @return whether the JNLP client will use any AWT/Swing
      * components.
      */
     public static boolean isHeadless() {
@@ -498,7 +504,7 @@ public class JNLPRuntime {
     }
 
     /**
-     * Returns whether we are verifying code signing.
+     * @return whether we are verifying code signing.
      */
     public static boolean isVerifying() {
         return verify;
@@ -510,6 +516,7 @@ public class JNLPRuntime {
      * AWT are disabled such that the client can be used in
      * headless mode ({@code java.awt.headless=true}).
      *
+     * @param enabled true if application do not wont/need gui or X at all
      * @throws IllegalStateException if the runtime was previously initialized
      */
     public static void setHeadless(boolean enabled) {
@@ -528,9 +535,11 @@ public class JNLPRuntime {
     
 
     /**
-         * Sets whether we will verify code signing.
-         * @throws IllegalStateException if the runtime was previously initialized
-         */
+     * Sets whether we will verify code signing.
+     *
+     * @param enabled true if app should verify signatures
+     * @throws IllegalStateException if the runtime was previously initialized
+     */
     public static void setVerify(boolean enabled) {
         checkInitialized();
         verify = enabled;
@@ -538,6 +547,7 @@ public class JNLPRuntime {
 
     /**
      * Returns whether the secure runtime environment is enabled.
+     * @return true if security manager is created
      */
     public static boolean isSecurityEnabled() {
         return securityEnabled;
@@ -579,6 +589,7 @@ public class JNLPRuntime {
      * Set a class that can exit the JVM; if not set then any class
      * can exit the JVM.
      *
+     * @param exitClass a class that can exit the JVM
      * @throws IllegalStateException if caller is not the exit class
      */
     public static void setExitClass(Class<?> exitClass) {
@@ -596,7 +607,7 @@ public class JNLPRuntime {
     }
 
     /**
-     * Return the current Application, or null if none can be
+     * @return the current Application, or null if none can be
      * determined.
      */
     public static ApplicationInstance getApplication() {
@@ -604,7 +615,7 @@ public class JNLPRuntime {
     }
 
     /**
-     * Return whether debug statements for the JNLP client code
+     * @return whether debug statements for the JNLP client code
      * should be printed.
      */
     public static boolean isDebug() {
@@ -619,6 +630,7 @@ public class JNLPRuntime {
      * Sets whether debug statements for the JNLP client code
      * should be printed to the standard output.
      *
+     * @param enabled set to true if you need full debug output
      * @throws IllegalStateException if caller is not the exit class
      */
     public static void setDebug(boolean enabled) {
@@ -630,6 +642,7 @@ public class JNLPRuntime {
     /**
      * Sets the default update policy.
      *
+     * @param policy global update policy of environment
      * @throws IllegalStateException if caller is not the exit class
      */
     public static void setDefaultUpdatePolicy(UpdatePolicy policy) {
@@ -638,7 +651,7 @@ public class JNLPRuntime {
     }
 
     /**
-     * Returns the default update policy.
+     * @return the default update policy.
      */
     public static UpdatePolicy getDefaultUpdatePolicy() {
         return updatePolicy;
@@ -646,6 +659,7 @@ public class JNLPRuntime {
 
     /**
      * Sets the default launch handler.
+     * @param handler default handler
      */
     public static void setDefaultLaunchHandler(LaunchHandler handler) {
         checkExitClass();
@@ -654,6 +668,7 @@ public class JNLPRuntime {
 
     /**
      * Returns the default launch handler.
+     * @return default handler
      */
     public static LaunchHandler getDefaultLaunchHandler() {
         return handler;
@@ -662,6 +677,7 @@ public class JNLPRuntime {
     /**
      * Sets the default download indicator.
      *
+     * @param indicator where to show progress
      * @throws IllegalStateException if caller is not the exit class
      */
     public static void setDefaultDownloadIndicator(DownloadIndicator indicator) {
@@ -670,43 +686,18 @@ public class JNLPRuntime {
     }
 
     /**
-     * Returns the default download indicator.
+     * @return the default download indicator.
      */
     public static DownloadIndicator getDefaultDownloadIndicator() {
         return indicator;
     }
 
-    /**
-     * Returns the localized resource string identified by the
-     * specified key. If the message is empty, a null is
-     * returned.
-     */
-    public static String getMessage(String key) {
-        try {
-            String result = resources.getString(key);
-            if (result.length() == 0)
-                return null;
-            else
-                return result;
-        } catch (Exception ex) {
-            if (!key.equals("RNoResource"))
-                return getMessage("RNoResource", new Object[] { key });
-            else
-                return "Missing resource: " + key;
-        }
+    public static String getLocalisedTimeStamp(Date timestamp) {
+        return DateFormat.getInstance().format(timestamp);
     }
 
     /**
-     * Returns the localized resource string using the specified arguments.
-     *
-     * @param args the formatting arguments to the resource string
-     */
-    public static String getMessage(String key, Object... args) {
-        return MessageFormat.format(getMessage(key), args);
-    }
-
-    /**
-     * Returns {@code true} if the current runtime will fork
+     * @return {@code true} if the current runtime will fork
      */
     public static boolean getForksAllowed() {
         return forksAllowed;
@@ -749,17 +740,6 @@ public class JNLPRuntime {
     }
 
     /**
-     * Load the resources.
-     */
-    private static void loadResources() {
-        try {
-            resources = ResourceBundle.getBundle("net.sourceforge.jnlp.resources.Messages");
-        } catch (Exception ex) {
-            throw new IllegalStateException("Missing resource bundle in netx.jar:net/sourceforge/jnlp/resource/Messages.properties");
-        }
-    }
-
-    /**
      * @return {@code true} if running on Windows
      */
     public static boolean isWindows() {
@@ -798,16 +778,12 @@ public class JNLPRuntime {
         try {
             String message = "This file is used to check if netx is running";
 
-            File netxRunningFile = new File(JNLPRuntime.getConfiguration()
-                    .getProperty(DeploymentConfiguration.KEY_USER_NETX_RUNNING_FILE));
+            File netxRunningFile = PathsAndFiles.MAIN_LOCK.getFile();
             if (!netxRunningFile.exists()) {
                 FileUtils.createParentDir(netxRunningFile);
                 FileUtils.createRestrictedFile(netxRunningFile, true);
-                FileOutputStream fos = new FileOutputStream(netxRunningFile);
-                try {
+                try (FileOutputStream fos = new FileOutputStream(netxRunningFile)) {
                     fos.write(message.getBytes());
-                } finally {
-                    fos.close();
                 }
             }
 
@@ -832,6 +808,7 @@ public class JNLPRuntime {
         }
 
         Runtime.getRuntime().addShutdownHook(new Thread("JNLPRuntimeShutdownHookThread") {
+            @Override
             public void run() {
                 markNetxStopped();
                 CacheUtil.cleanCache();
@@ -851,14 +828,21 @@ public class JNLPRuntime {
             fileLock.release();
             fileLock.channel().close();
             fileLock = null;
-            OutputController.getLogger().log("Release shared lock on " + JNLPRuntime.getConfiguration()
-                        .getProperty(DeploymentConfiguration.KEY_USER_NETX_RUNNING_FILE));
+            OutputController.getLogger().log("Release shared lock on " + PathsAndFiles.MAIN_LOCK.getFullPath());
         } catch (IOException e) {
             OutputController.getLogger().log(e);
         }
     }
 
-    static void setTrustAll(boolean b) {
+    public static void setHtml(boolean html) {
+        JNLPRuntime.html = html;
+    }
+
+    public static boolean isHtml() {
+        return html;
+    }
+
+    public static void setTrustAll(boolean b) {
         trustAll=b;
     }
 
@@ -866,7 +850,7 @@ public class JNLPRuntime {
         return trustAll;
     }
 
-    static void setTrustNone(final boolean b) {
+    public static void setTrustNone(final boolean b) {
         trustNone = b;
     }
 
@@ -897,7 +881,14 @@ public class JNLPRuntime {
     }
 
     public static void exit(int i) {
-        OutputController.getLogger().close();
+        try {
+            OutputController.getLogger().close();
+            while (BasicExceptionDialog.areShown()){
+                Thread.sleep(100);
+            }
+        } catch (Exception ex) {
+            //to late
+        }
         System.exit(i);
     }
 

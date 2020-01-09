@@ -205,9 +205,7 @@ public class ConsoleOutputPaneModel {
             }
             String line = (createLine(messageWithHeader));
             if (mark) {
-                line = line.replaceAll("\n", "<br/>\n");
-                line = line.replaceAll("  ", "&nbsp; ");//small trick, html is reducting row of spaces to single space. This handles it and stimm allow line wrap
-                line = line.replaceAll("\t", "&nbsp;&nbsp;&nbsp;&nbsp;");
+                line = escapeHtmlForJTextPane(line);
             }
             sb.append(line);
             if (mark) {
@@ -225,6 +223,15 @@ public class ConsoleOutputPaneModel {
         statisticsShown = added;
         return sb.toString();
 
+    }
+
+    public static String escapeHtmlForJTextPane(String line) {
+        line = line.replaceAll("<", "&lt;")
+                .replaceAll(">", "&gt;")
+                .replaceAll("\n", "<br/>\n")
+                .replaceAll("  ", "&nbsp; ")//small trick, html is reducting row of spaces to single space. This handles it and stimm allow line wrap
+                .replaceAll("\t", "&nbsp;&nbsp;&nbsp;&nbsp;");
+        return line;
     }
 
     String createLine(MessageWithHeader m) {
@@ -288,7 +295,7 @@ public class ConsoleOutputPaneModel {
                     Collections.sort(sortedData, new CatchedMessageWithHeaderComparator() {
                         @Override
                         public int body(MessageWithHeader o1, MessageWithHeader o2) {
-                            return o1.getHeader().date.compareTo(o2.getHeader().date);
+                            return o1.getHeader().timestamp.compareTo(o2.getHeader().timestamp);
                         }
                     });
                     break;

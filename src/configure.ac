@@ -1,6 +1,7 @@
-AC_INIT([icedtea-web],[1.5.1],[distro-pkg-dev@openjdk.java.net], [icedtea-web], [http://icedtea.classpath.org/wiki/IcedTea-Web])
+AC_INIT([icedtea-web],[1.6.2],[distro-pkg-dev@openjdk.java.net], [icedtea-web], [http://icedtea.classpath.org/wiki/IcedTea-Web])
 AM_INIT_AUTOMAKE([1.9 tar-pax foreign])
 AC_CONFIG_FILES([Makefile netx.manifest])
+AM_MAINTAINER_MODE([enable])
 
 # Older automake doesn't generate these correctly
 abs_top_builddir=`pwd -P`
@@ -27,6 +28,14 @@ AC_ARG_ENABLE([docs],
 AM_CONDITIONAL([ENABLE_DOCS], [test x$ENABLE_DOCS = xyes])
 AC_MSG_RESULT(${ENABLE_DOCS})
 
+AC_MSG_CHECKING([whether to filter by whitelisting on directory name when processing, compiling and running reproducers])
+AC_ARG_ENABLE([whitelist-processing],
+	      [AS_HELP_STRING([--enable-whitelist-processing],
+	      		      [Enable whitelist filter on directory name when processing, compiling and running reproducers. Otherwise filter on testcase name when running reproducers])],
+	      [ENABLE_WHITELIST="${enableval}"], [ENABLE_WHITELIST='no'])
+AM_CONDITIONAL([ENABLE_WHITELIST], [test x$ENABLE_WHITELIST = xyes])
+AC_MSG_RESULT(${ENABLE_WHITELIST})
+
 AC_PATH_PROG([BIN_BASH], [bash],, [/bin])
 if test x"$BIN_BASH" = x ; then
     AC_MSG_ERROR([/bin/bash is used in runtime and for about generation. Dying sooner rather then later])
@@ -37,10 +46,11 @@ FIND_TOOL([ZIP], [zip])
 FIND_JAVAC
 FIND_JAR
 FIND_ECJ_JAR
+IT_CHECK_JAVA_VERSION
 IT_FIND_JAVADOC
 IT_FIND_KEYTOOL
 IT_FIND_JARSIGNER
-AC_CONFIG_FILES([javac], [chmod +x javac])
+IT_FIND_PACK200
 
 IT_SET_VERSION
 IT_CHECK_XULRUNNER_VERSION
@@ -58,11 +68,10 @@ AC_SUBST(X11_LIBS)
 
 dnl PR46074 (gcc) - Missing java.net cookie code required by IcedTea plugin
 dnl IT563 - NetX uses sun.security code
-dnl IT605 - NetX depends on sun.misc.HexDumpEncoder
+dnl IT605 - NetX depends on sun.misc HexDumpEncoder or sun.security.util.HexDumpEncoder
 dnl IT570 - NetX depends on sun.applet.AppletViewPanel
 dnl IT571 - NetX depends on com.sun.net.ssl.internal.ssl.X509ExtendedTrustManager.java
 dnl IT573 - Plugin depends on sun.awt,X11.XEmbeddedFrame.java
-dnl IT574 - Plugin depends on sun.misc.Ref
 dnl IT575 - Plugin depends on com.sun/jndi.toolkit.url.UrlUtil
 dnl IT576 - Plugin depends on sun.applet.AppletImageRef
 dnl IT578 - Remove need for patching AppletPanel for Plugin/Webstart
@@ -74,14 +83,13 @@ IT_CHECK_FOR_CLASS(SUN_SECURITY_PROVIDER_X509FACTORY, [sun.security.provider.X50
 IT_CHECK_FOR_CLASS(SUN_SECURITY_UTIL_SECURITYCONSTANTS, [sun.security.util.SecurityConstants])
 IT_CHECK_FOR_CLASS(SUN_SECURITY_UTIL_HOSTNAMECHECKER, [sun.security.util.HostnameChecker])
 IT_CHECK_FOR_CLASS(SUN_SECURITY_X509_X500NAME, [sun.security.x509.X500Name])
-IT_CHECK_FOR_CLASS(SUN_MISC_HEXDUMPENCODER, [sun.misc.HexDumpEncoder])
+IT_CHECK_FOR_HEXDUMPENCODER
 IT_CHECK_FOR_CLASS(SUN_SECURITY_VALIDATOR_VALIDATOREXCEPTION, [sun.security.validator.ValidatorException])
 IT_CHECK_FOR_CLASS(COM_SUN_NET_SSL_INTERNAL_SSL_X509EXTENDEDTRUSTMANAGER,
 	[com.sun.net.ssl.internal.ssl.X509ExtendedTrustManager])
 IT_CHECK_FOR_CLASS(SUN_NET_WWW_PROTOCOL_JAR_URLJARFILE, [sun.net.www.protocol.jar.URLJarFile])
 IT_CHECK_FOR_CLASS(SUN_NET_WWW_PROTOCOL_JAR_URLJARFILECALLBACK, [sun.net.www.protocol.jar.URLJarFileCallBack])
 IT_CHECK_FOR_CLASS(SUN_AWT_X11_XEMBEDDEDFRAME, [sun.awt.X11.XEmbeddedFrame])
-IT_CHECK_FOR_CLASS(SUN_MISC_REF, [sun.misc.Ref])
 IT_CHECK_FOR_CLASS(COM_SUN_JNDI_TOOLKIT_URL_URLUTIL, [com.sun.jndi.toolkit.url.UrlUtil])
 IT_CHECK_FOR_CLASS(SUN_APPLET_APPLETIMAGEREF, [sun.applet.AppletImageRef])
 IT_CHECK_FOR_SUN_APPLET_ACCESSIBILITY
@@ -109,8 +117,8 @@ IT_FIND_OPTIONAL_JAR([rhino], RHINO,
     [/usr/share/java/js.jar /usr/share/rhino-1.6/lib/js.jar])
 IT_FIND_OPTIONAL_JAR([junit], JUNIT,
     [/usr/share/java/junit4.jar /usr/share/junit-4/lib/junit.jar])
-IT_FIND_OPTIONAL_JAR([emma], EMMA,
-    [/usr/share/java/emma.jar])
+IT_FIND_OPTIONAL_JAR([hamcrest], HAMCREST,
+    [/usr/share/java/hamcrest/all.jar /usr/share/java/hamcrest-core.jar])
 IT_FIND_OPTIONAL_JAR([jacoco], JACOCO,
     [/usr/share/java/jacoco/org.jacoco.core.jar])
 IT_FIND_OPTIONAL_JAR([asm], ASM,

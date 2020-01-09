@@ -19,10 +19,10 @@ package net.sourceforge.jnlp;
 import java.awt.AWTPermission;
 import java.io.FilePermission;
 import java.lang.reflect.Constructor;
-import java.lang.reflect.InvocationTargetException;
 import java.net.SocketPermission;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.net.URL;
 import java.security.AllPermission;
 import java.security.CodeSource;
 import java.security.Permission;
@@ -30,14 +30,11 @@ import java.security.PermissionCollection;
 import java.security.Permissions;
 import java.security.Policy;
 import java.security.URIParameter;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashSet;
-import java.util.PropertyPermission;
-import java.util.Set;
+import java.util.*;
 
 import net.sourceforge.jnlp.config.DeploymentConfiguration;
 import net.sourceforge.jnlp.runtime.JNLPRuntime;
+import net.sourceforge.jnlp.util.UrlUtils;
 import net.sourceforge.jnlp.util.logging.OutputController;
 
 /**
@@ -137,7 +134,7 @@ public class SecurityDesc {
     private Object type;
 
     /** the download host */
-    private String downloadHost;
+    final private URL downloadHost;
 
     /** whether sandbox applications should get the show window without banner permission */
     private final boolean grantAwtPermissions;
@@ -163,17 +160,7 @@ public class SecurityDesc {
         try {
             urlPermissionClass = (Class<Permission>) Class.forName("java.net.URLPermission");
             urlPermissionConstructor = urlPermissionClass.getDeclaredConstructor(new Class[] { String.class });
-        } catch (final SecurityException e) {
-            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while reflectively finding URLPermission - host is probably not running Java 8+");
-            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
-            urlPermissionClass = null;
-            urlPermissionConstructor = null;
-        } catch (final ClassNotFoundException e) {
-            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while reflectively finding URLPermission - host is probably not running Java 8+");
-            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
-            urlPermissionClass = null;
-            urlPermissionConstructor = null;
-        } catch (final NoSuchMethodException e) {
+        } catch (final ReflectiveOperationException | SecurityException e) {
             OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while reflectively finding URLPermission - host is probably not running Java 8+");
             OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
             urlPermissionClass = null;
@@ -271,7 +258,7 @@ public class SecurityDesc {
      * @param type the type of security
      * @param downloadHost the download host (can always connect to)
      */
-    public SecurityDesc(JNLPFile file, RequestedPermissionLevel requestedPermissionLevel, Object type, String downloadHost) {
+    public SecurityDesc(JNLPFile file, RequestedPermissionLevel requestedPermissionLevel, Object type, URL downloadHost) {
         if (file == null) {
             throw new NullJnlpFileException();
         }
@@ -293,7 +280,7 @@ public class SecurityDesc {
      * @param type the type of security
      * @param downloadHost the download host (can always connect to)
      */
-    public SecurityDesc(JNLPFile file, Object type, String downloadHost) {
+    public SecurityDesc(JNLPFile file, Object type, URL downloadHost) {
         this(file, RequestedPermissionLevel.NONE, type, downloadHost);
     }
 
@@ -323,7 +310,7 @@ public class SecurityDesc {
     }
 
     /**
-     * Returns the permissions type, one of: ALL_PERMISSIONS,
+     * @return the permissions type, one of: ALL_PERMISSIONS,
      * SANDBOX_PERMISSIONS, J2EE_PERMISSIONS.
      */
     public Object getSecurityType() {
@@ -331,7 +318,7 @@ public class SecurityDesc {
     }
 
     /**
-     * Returns a PermissionCollection containing the basic
+     * @return a PermissionCollection containing the basic
      * permissions granted depending on the security type.
      *
      * @param cs the CodeSource to get permissions for
@@ -352,8 +339,9 @@ public class SecurityDesc {
 
         // add j2ee to sandbox if needed
         if (J2EE_PERMISSIONS.equals(type))
-            for (int i = 0; i < j2eePermissions.length; i++)
-                permissions.add(j2eePermissions[i]);
+            for (Permission j2eePermission : j2eePermissions) {
+                permissions.add(j2eePermission);
+        }
 
         return permissions;
     }
@@ -366,13 +354,14 @@ public class SecurityDesc {
     }
 
     /**
-     * Returns a PermissionCollection containing the sandbox permissions
+     * @return a PermissionCollection containing the sandbox permissions
      */
     public PermissionCollection getSandBoxPermissions() {
         final Permissions permissions = new Permissions();
 
-        for (int i = 0; i < sandboxPermissions.length; i++)
-            permissions.add(sandboxPermissions[i]);
+        for (Permission sandboxPermission : sandboxPermissions) {
+            permissions.add(sandboxPermission);
+        }
 
         if (grantAwtPermissions) {
             permissions.add(new AWTPermission("showWindowWithoutWarningBanner"));
@@ -382,15 +371,16 @@ public class SecurityDesc {
                 throw new NullJnlpFileException("Can not return sandbox permissions, file is null");
             }
             if (file.isApplication()) {
-                for (int i = 0; i < jnlpRIAPermissions.length; i++) {
-                    permissions.add(jnlpRIAPermissions[i]);
+                for (Permission jnlpRIAPermission : jnlpRIAPermissions) {
+                    permissions.add(jnlpRIAPermission);
                 }
             }
         }
 
-        if (downloadHost != null && downloadHost.length() > 0)
-            permissions.add(new SocketPermission(downloadHost,
-                                                 "connect, accept"));
+        if (downloadHost != null && downloadHost.getHost().length() > 0) {
+            permissions.add(new SocketPermission(UrlUtils.getHostAndPort(downloadHost),
+                    "connect, accept"));
+        }
 
         final Collection<Permission> urlPermissions = getUrlPermissions();
         for (final Permission permission : urlPermissions) {
@@ -404,7 +394,7 @@ public class SecurityDesc {
         if (urlPermissionClass == null || urlPermissionConstructor == null) {
             return Collections.emptySet();
         }
-        final Set<Permission> permissions = new HashSet<Permission>();
+        final Set<Permission> permissions = new HashSet<>();
         for (final JARDesc jar : file.getResources().getJARs()) {
             try {
                 // Allow applets all HTTP methods (ex POST, GET) with any request headers
@@ -416,39 +406,27 @@ public class SecurityDesc {
                 final String urlPermissionUrlString = appendRecursiveSubdirToCodebaseHostString(hostUriString);
                 final Permission p = urlPermissionConstructor.newInstance(urlPermissionUrlString);
                 permissions.add(p);
+            } catch (final ReflectiveOperationException e) {
+                OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while attempting to reflectively generate a URLPermission, probably not running on Java 8+?");
+                OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
             } catch (final URISyntaxException e) {
                 OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Could not determine codebase host for resource at " + jar.getLocation() +  " while generating URLPermissions");
                 OutputController.getLogger().log(e);
-            } catch (final InvocationTargetException e) {
-                OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while attempting to reflectively generate a URLPermission, probably not running on Java 8+?");
-                OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
-            } catch (final InstantiationException e) {
-                OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while attempting to reflectively generate a URLPermission, probably not running on Java 8+?");
-                OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
-            } catch (final IllegalAccessException e) {
-                OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while attempting to reflectively generate a URLPermission, probably not running on Java 8+?");
-                OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
             }
         }
         try {
-            final URI codebase = file.getCodeBase().toURI().normalize();
+            final URI codebase = file.getNotNullProbalbeCodeBase().toURI().normalize();
             final URI host = getHost(codebase);
             final String codebaseHostUriString = host.toString();
             final String urlPermissionUrlString = appendRecursiveSubdirToCodebaseHostString(codebaseHostUriString);
             final Permission p = urlPermissionConstructor.newInstance(urlPermissionUrlString);
             permissions.add(p);
+        } catch (final ReflectiveOperationException e) {
+            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while attempting to reflectively generate a URLPermission, probably not running on Java 8+?");
+            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
         } catch (final URISyntaxException e) {
             OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Could not determine codebase host for codebase " + file.getCodeBase() +  "  while generating URLPermissions");
             OutputController.getLogger().log(e);
-        } catch (final InvocationTargetException e) {
-            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while attempting to reflectively generate a URLPermission, probably not running on Java 8+?");
-            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
-        } catch (final InstantiationException e) {
-            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while attempting to reflectively generate a URLPermission, probably not running on Java 8+?");
-            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
-        } catch (final IllegalAccessException e) {
-            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, "Exception while attempting to reflectively generate a URLPermission, probably not running on Java 8+?");
-            OutputController.getLogger().log(OutputController.Level.WARNING_DEBUG, e);
         }
         return permissions;
     }
@@ -462,7 +440,7 @@ public class SecurityDesc {
      * @throws URISyntaxException
      */
     static URI getHostWithSpecifiedPort(final URI codebase, final int port) throws URISyntaxException {
-        requireNonNull(codebase);
+        Objects.requireNonNull(codebase);
         return new URI(codebase.getScheme(), codebase.getUserInfo(), codebase.getHost(), port, null, null, null);
     }
 
@@ -474,7 +452,7 @@ public class SecurityDesc {
      * @throws URISyntaxException
      */
     static URI getHost(final URI codebase) throws URISyntaxException {
-        requireNonNull(codebase);
+        Objects.requireNonNull(codebase);
         return getHostWithSpecifiedPort(codebase, codebase.getPort());
     }
 
@@ -487,7 +465,7 @@ public class SecurityDesc {
      * @return the resulting String eg "http://example.com:8080/-
      */
     static String appendRecursiveSubdirToCodebaseHostString(final String codebaseHost) {
-        requireNonNull(codebaseHost);
+        Objects.requireNonNull(codebaseHost);
         String result = codebaseHost;
         while (result.endsWith("/")) {
             result = result.substring(0, result.length() - 1);
@@ -497,14 +475,8 @@ public class SecurityDesc {
         return result;
     }
 
-    private static void requireNonNull(final Object arg) {
-        if (arg == null) {
-            throw new NullPointerException();
-        }
-    }
-
     /**
-     * Returns all the names of the basic JNLP system properties accessible by RIAs
+     * @return all the names of the basic JNLP system properties accessible by RIAs
      */
     public static String[] getJnlpRIAPermissions() {
         String[] jnlpPermissions = new String[jnlpRIAPermissions.length];

@@ -39,7 +39,6 @@ import java.io.File;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.PropertyResourceBundle;
 import net.sourceforge.jnlp.ProcessResult;
 import net.sourceforge.jnlp.ServerAccess;
 import net.sourceforge.jnlp.annotations.NeedsDisplay;
@@ -48,8 +47,13 @@ import net.sourceforge.jnlp.browsertesting.BrowserTest;
 import net.sourceforge.jnlp.browsertesting.Browsers;
 import net.sourceforge.jnlp.closinglisteners.AutoOkClosingListener;
 import net.sourceforge.jnlp.closinglisteners.RulesFolowingClosingListener;
+import net.sourceforge.jnlp.config.DeploymentConfiguration;
+import net.sourceforge.jnlp.runtime.ManifestAttributesChecker;
+import net.sourceforge.jnlp.tools.DeploymentPropertiesModifier;
 import net.sourceforge.jnlp.util.FileUtils;
+import org.junit.AfterClass;
 import org.junit.Assert;
+import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class CodeBaseManifestEntrySignedMatching extends BrowserTest {
@@ -66,11 +70,25 @@ public class CodeBaseManifestEntrySignedMatching extends BrowserTest {
         /*5*/ "CBCheckSignedAppletDontMatchException",
         /*6*/ "CBCheckSignedFail"};
 
+    private static DeploymentPropertiesModifier codebaseModifier;
+
+    @BeforeClass
+    public static void setupDeploymentProperties() throws IOException {
+        codebaseModifier = new DeploymentPropertiesModifier();
+        codebaseModifier.setProperties(DeploymentConfiguration.KEY_ENABLE_MANIFEST_ATTRIBUTES_CHECK, ManifestAttributesChecker.MANIFEST_ATTRIBUTES_CHECK.CODEBASE.toString());
+    }
+
+    @AfterClass
+    public static void setbackDeploymentProperties() throws IOException {
+        codebaseModifier.restoreProperties();
+    }
+
     public static String getMessage(int i) {
         try {
             String s = "";//_cs, _de, _pl
-            PropertyResourceBundle props = new PropertyResourceBundle(CodeBaseManifestEntrySignedMatching.class.getClassLoader().getResourceAsStream("net/sourceforge/jnlp/resources/Messages" + s + ".properties"));
-            return props.getString(keys[i]);
+            PropertyResourceBundle props = new PropertyResourceBundle(CodeBaseManifestEntrySignedMatching.class.getResourceAsStream("/net/sourceforge/jnlp/resources/Messages" + s + ".properties"));
+            //Bundle messages need to be formatted
+            return MessageFormat.format(props.getString(keys[i]), new Object[0]);
         } catch (IOException ex) {
             throw new RuntimeException(ex);
         }

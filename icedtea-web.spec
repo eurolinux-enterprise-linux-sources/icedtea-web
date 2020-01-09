@@ -1,13 +1,12 @@
 # Version of java
-%define javaver 1.7.0
+%define javaver 1.8.0
 
 # Alternatives priority
-%define priority 17000
+%define priority 18000
 
-
-%define javadir     %{_jvmdir}/java-openjdk
-%define jredir      %{_jvmdir}/jre-openjdk
-%ifarch %{multilib_arches}
+%define javadir     %{_jvmdir}/java-%{javaver}-openjdk.%{_arch}
+%define jredir      %{_jvmdir}/jre-%{javaver}-openjdk.%{_arch}
+%ifarch x86_64
 %define javaplugin  libjavaplugin.so.%{_arch}
 %else
 %define javaplugin  libjavaplugin.so
@@ -16,7 +15,7 @@
 %define binsuffix      .itweb
 
 Name:		icedtea-web
-Version:	1.5.1
+Version:	1.6.2
 Release:	1%{?dist}
 Summary:	Additional Java components for OpenJDK - Java browser plug-in and Web Start implementation
 
@@ -35,6 +34,8 @@ BuildRequires:  xulrunner-devel
 BuildRequires:  junit4
 # new in 1.5 to have  clean up for malformed XMLs
 BuildRequires:  tagsoup
+# rhino is used as JS evaluator in testtime
+BuildRequires:      rhino
 
 # For functionality and the OpenJDK dirs
 Requires:      java-%{javaver}-openjdk
@@ -44,6 +45,9 @@ Requires:       mozilla-filesystem%{?_isa}
 
 # When itw builds against it, it have to be also in runtime
 Requires:      tagsoup
+
+# rhino is used as JS evaluator in runtime
+Requires:      rhino
 
 # Post requires alternatives to install plugin alternative.
 Requires(post):   %{_sbindir}/alternatives
@@ -96,19 +100,22 @@ make %{?_smp_mflags}
 rm -rf $RPM_BUILD_ROOT
 make install DESTDIR=$RPM_BUILD_ROOT
 
+# icedteaweb-completion is currently not handled by make nor make install
+mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d/
+cp icedteaweb-completion $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d/
+
 # Move javaws man page to a more specific name
 mv $RPM_BUILD_ROOT/%{_mandir}/man1/javaws.1 $RPM_BUILD_ROOT/%{_mandir}/man1/javaws-itweb.1
 
 # Install desktop files.
 install -d -m 755 $RPM_BUILD_ROOT%{_datadir}/{applications,pixmaps}
-cp javaws.png $RPM_BUILD_ROOT%{_datadir}/pixmaps
 desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications javaws.desktop
 desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications itweb-settings.desktop
 desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications policyeditor.desktop
-ln -s  %{_mandir}/man1/javaws-itweb.1   $RPM_BUILD_ROOT/%{_mandir}/man1/icedtea-web.1
+
 
 %check
 #make check
@@ -123,7 +130,6 @@ alternatives \
 
 %posttrans
 update-desktop-database &> /dev/null || :
-
 exit 0
 
 %postun
@@ -133,16 +139,19 @@ then
   alternatives --remove %{javaplugin} \
     %{_libdir}/IcedTeaPlugin.so
 fi
-
 exit 0
 
 %files
 %defattr(-,root,root,-)
+%{_sysconfdir}/bash_completion.d/icedteaweb-completion
 %{_prefix}/bin/*
 %{_libdir}/IcedTeaPlugin.so
 %{_datadir}/applications/*
-%{_datadir}/icedtea-web
+%{_datadir}/%{name}
 %{_datadir}/man/man1/*
+%{_datadir}/man/cs/man1/*
+%{_datadir}/man/de/man1/*
+%{_datadir}/man/pl/man1/*
 %{_datadir}/pixmaps/*
 %doc NEWS README COPYING
 
@@ -152,6 +161,15 @@ exit 0
 %doc COPYING
 
 %changelog
+* Wed Feb 03 2016 Jiri Vanek <jvanek@redhat.com> 1.6.2-1
+- updated to 1.6.2
+- fixed also rhbz#1303437 - package owns /etc/bash_completion.d but it should not own it 
+- Resolves: rhbz#1275523
+
+* Thu Nov 19 2015 Jiri Vanek <jvanek@redhat.com> 1.6.1-4
+- updated to 1.6.1
+- Resolves: rhbz#1275523
+
 * Mon Aug 18 2014 Jiri Vanek <jvanek@redhat.com> 1.5.1-1
 - fixed obsolates to any jdk6 plugin
 - Resolves: rhbz#1075790
@@ -161,7 +179,7 @@ exit 0
 - removed all patches (all upstreamed)
 - Resolves: rhbz#1075790
 
-* Mon Apr 22 2014 Jiri Vanek <jvanek@redhat.com> 1.5-3
+* Thu Apr 24 2014 Jiri Vanek <jvanek@redhat.com> 1.5-3
 - rebuild with tagsoup dependency
 - Resolves: rhbz#1075790
 
