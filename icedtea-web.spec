@@ -1,9 +1,3 @@
-
-# We require at the least the first release java-1.6.0-openjdk 
-# with IcedTea6 1.10
-%define min_openjdk_version 1:1.6.0.0-60
-%define multilib_arches ppc64 sparc64 x86_64
-
 # Version of java
 %define javaver 1.7.0
 
@@ -14,26 +8,22 @@
 %define javadir     %{_jvmdir}/java-openjdk
 %define jredir      %{_jvmdir}/jre-openjdk
 %ifarch %{multilib_arches}
-%define jre6dir     %{_jvmdir}/jre-1.6.0-openjdk.%{_arch}
 %define javaplugin  libjavaplugin.so.%{_arch}
 %else
-%define jre6dir     %{_jvmdir}/jre-1.6.0-openjdk
 %define javaplugin  libjavaplugin.so
 %endif
 
 %define binsuffix      .itweb
 
 Name:		icedtea-web
-Version:	1.4.1
-Release:	0%{?dist}
+Version:	1.5.1
+Release:	1%{?dist}
 Summary:	Additional Java components for OpenJDK - Java browser plug-in and Web Start implementation
 
 Group:      Applications/Internet
 License:    LGPLv2+ and GPLv2 with exceptions
 URL:        http://icedtea.classpath.org/wiki/IcedTea-Web
 Source0:    http://icedtea.classpath.org/download/source/%{name}-%{version}.tar.gz
-
-BuildRoot:	%(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
 
 BuildRequires:  java-%{javaver}-openjdk-devel
 BuildRequires:  desktop-file-utils
@@ -43,12 +33,17 @@ BuildRequires:  autoconf
 BuildRequires:  automake
 BuildRequires:  xulrunner-devel
 BuildRequires:  junit4
+# new in 1.5 to have  clean up for malformed XMLs
+BuildRequires:  tagsoup
 
 # For functionality and the OpenJDK dirs
 Requires:      java-%{javaver}-openjdk
 
 # For the mozilla plugin dir
 Requires:       mozilla-filesystem%{?_isa}
+
+# When itw builds against it, it have to be also in runtime
+Requires:      tagsoup
 
 # Post requires alternatives to install plugin alternative.
 Requires(post):   %{_sbindir}/alternatives
@@ -61,7 +56,7 @@ Provides: java-plugin = 1:%{javaver}
 Provides: javaws      = 1:%{javaver}
 
 Provides:   java-%{javaver}-openjdk-plugin =  1:%{version}
-Obsoletes:  java-1.6.0-openjdk-plugin <= %{min_openjdk_version}
+Obsoletes:  java-1.6.0-openjdk-plugin
 
 ExclusiveArch: x86_64 i686
 
@@ -85,7 +80,9 @@ This package contains Javadocs for the IcedTea-Web project.
 %setup -q
 
 %build
-./configure \
+autoreconf -vfi
+CXXFLAGS="$RPM_OPT_FLAGS $RPM_LD_FLAGS" \
+%configure \
     --with-pkgversion=rhel-%{release}-%{_arch} \
     --docdir=%{_datadir}/javadoc/%{name} \
     --with-jdk-home=%{javadir} \
@@ -93,7 +90,7 @@ This package contains Javadocs for the IcedTea-Web project.
     --libdir=%{_libdir} \
     --program-suffix=%{binsuffix} \
     --prefix=%{_prefix}
-make
+make %{?_smp_mflags}
 
 %install
 rm -rf $RPM_BUILD_ROOT
@@ -109,13 +106,12 @@ desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications javaws.desktop
 desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications itweb-settings.desktop
+desktop-file-install --vendor ''\
+  --dir $RPM_BUILD_ROOT%{_datadir}/applications policyeditor.desktop
 ln -s  %{_mandir}/man1/javaws-itweb.1   $RPM_BUILD_ROOT/%{_mandir}/man1/icedtea-web.1
 
 %check
 #make check
-
-%clean
-rm -rf $RPM_BUILD_ROOT
 
 %post
 alternatives \
@@ -156,6 +152,28 @@ exit 0
 %doc COPYING
 
 %changelog
+* Mon Aug 18 2014 Jiri Vanek <jvanek@redhat.com> 1.5.1-1
+- fixed obsolates to any jdk6 plugin
+- Resolves: rhbz#1075790
+
+* Fri Aug 15 2014 Jiri Vanek <jvanek@redhat.com> 1.5.1-0
+- update to upstream 1.5.1
+- removed all patches (all upstreamed)
+- Resolves: rhbz#1075790
+
+* Mon Apr 22 2014 Jiri Vanek <jvanek@redhat.com> 1.5-3
+- rebuild with tagsoup dependency
+- Resolves: rhbz#1075790
+
+* Mon Apr 07 2014 Jiri Vanek <jvanek@redhat.com> 1.5-2
+- temporally removed tagsoup dependency - needs to be negotiated
+- Resolves: rhbz#1075790
+
+* Mon Apr 07 2014 Jiri Vanek <jvanek@redhat.com> 1.5-1
+- sync with f21
+- removed rhel5 specific clean and buildroot
+- Resolves: rhbz#1075790
+
 * Wed Jul 10 2013 Jiri Vanek <jvanek@redhat.com> 1.4.1-0
 - updated to 1.4.1
 - add icedtea-web man page

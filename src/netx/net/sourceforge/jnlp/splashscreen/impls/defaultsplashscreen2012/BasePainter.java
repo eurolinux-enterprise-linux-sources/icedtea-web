@@ -36,13 +36,16 @@ obligated to do so.  If you do not wish to do so, delete this
 exception statement from your version. */
 package net.sourceforge.jnlp.splashscreen.impls.defaultsplashscreen2012;
 
+import java.awt.BasicStroke;
 import net.sourceforge.jnlp.splashscreen.impls.*;
 import java.awt.Color;
 import java.awt.Font;
 import java.awt.FontMetrics;
 import java.awt.Graphics;
 import java.awt.Graphics2D;
+import java.awt.Point;
 import java.awt.RenderingHints;
+import java.awt.Stroke;
 import java.awt.Toolkit;
 import java.awt.font.TextAttribute;
 import java.awt.image.BufferedImage;
@@ -54,10 +57,13 @@ import java.util.Observable;
 import java.util.Observer;
 
 import javax.swing.SwingUtilities;
+import net.sourceforge.jnlp.runtime.Translator;
 import net.sourceforge.jnlp.splashscreen.SplashUtils.SplashReason;
 import net.sourceforge.jnlp.splashscreen.parts.BasicComponentSplashScreen;
 import net.sourceforge.jnlp.splashscreen.parts.InfoItem;
 import net.sourceforge.jnlp.splashscreen.parts.InformationElement;
+import net.sourceforge.jnlp.splashscreen.parts.extensions.ExtensionManager;
+import net.sourceforge.jnlp.util.logging.OutputController;
 import net.sourceforge.jnlp.util.ScreenFinder;
 
 public class BasePainter implements Observer {
@@ -71,11 +77,11 @@ public class BasePainter implements Observer {
     private int greyTextIncrment = 15; //how quickly is greyed web moving
     //colors
     protected static final Color TEA_LIVE_COLOR = new Color(205, 1, 3);
-    protected static final Color BACKGROUND_LIVE_COLOR = Color.white;
+    protected static final Color BACKGROUND_LIVE_COLOR = ExtensionManager.getExtension().getBackground();
     protected static final Color TEA_LEAFS_STALKS_LIVE_COLOR = Color.black;
-    protected static final Color PLUGIN_LIVE_COLOR = Color.black;
-    protected static final Color WATER_LIVE_COLOR = new Color(80, 131, 160);
-    protected static final Color PLAIN_TEXT_LIVE_COLOR = Color.black;
+    protected static final Color PLUGIN_LIVE_COLOR = ExtensionManager.getExtension().getPluginTextColor();
+    public static final Color WATER_LIVE_COLOR = new Color(80, 131, 160);
+    protected static final Color PLAIN_TEXT_LIVE_COLOR = ExtensionManager.getExtension().getTextColor();
     protected Color teaColor;
     protected Color backgroundColor;
     protected Color teaLeafsStalksColor;
@@ -115,6 +121,14 @@ public class BasePainter implements Observer {
     protected TextWithWaterLevel twl;
     protected TextWithWaterLevel oldTwl;
     protected boolean canWave = true;
+    private Point aboutOfset = new Point();
+    
+    private final static float dash1[] = {10.0f};
+    private final static BasicStroke dashed =
+        new BasicStroke(1.0f,
+                        BasicStroke.CAP_BUTT,
+                        BasicStroke.JOIN_MITER,
+                        10.0f, dash1, 0.0f);
 
     protected void paintNiceTexts(Graphics2D g2d) {
         //the only animated stuff
@@ -224,6 +238,7 @@ public class BasePainter implements Observer {
         this.master = master;
         setColors();
         adjustForSize(master.getSplashWidth(), master.getSplashHeight());
+        ExtensionManager.getExtension().adjustForSize(master.getSplashWidth(), master.getSplashHeight());
         if (startAnimation) {
             startAnimationThreads();
         }
@@ -231,6 +246,7 @@ public class BasePainter implements Observer {
     }
 
     public void increaseAnimationPosition() {
+        ExtensionManager.getExtension().animate();
         animationsPosition += greyTextIncrment;
     }
 
@@ -248,6 +264,7 @@ public class BasePainter implements Observer {
         }
 
         if (showNiceTexts) {
+            ExtensionManager.getExtension().paint(g, this);
             paintNiceTexts(g2d);
         } else {
             paintPlainTexts(g2d);
@@ -262,6 +279,7 @@ public class BasePainter implements Observer {
         //enablings depends on fonts
         setEnablings(width, height, master.getVersion(), master.getInformationElement(), (Graphics2D) (master.getGraphics()));
         prerenderedStuff = prerenderStill();
+        ExtensionManager.getExtension().adjustForSize(width, height);
     }
 
     private void setEnablings(int w, int h, String version, InformationElement ic, Graphics2D g2d) {
@@ -404,7 +422,7 @@ public class BasePainter implements Observer {
                     this.notifyObservers();
                     Thread.sleep(MOOVING_TEXT_DELAY);
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    OutputController.getLogger().log(e);
                 }
             }
         }
@@ -438,7 +456,7 @@ public class BasePainter implements Observer {
                     //it is risinfg slower and slower
                     Thread.sleep((waterLevel / 4) * 30);
                 } catch (Exception e) {
-                    e.printStackTrace();
+                    OutputController.getLogger().log(e);
                 }
             }
         }
@@ -510,11 +528,22 @@ public class BasePainter implements Observer {
         g2d.setColor(plainTextColor);
         FontMetrics fm = g2d.getFontMetrics();
         if (version != null) {
-            String niceVersion=stripCommitFromVersion(version);
+            String aboutPrefix = Translator.R("AboutDialogueTabAbout") + ": ";
+            int aboutPrefixWidth = fm.stringWidth(aboutPrefix);
+            String niceVersion = stripCommitFromVersion(version);
             int y = master.getSplashWidth() - fm.stringWidth(niceVersion + " ");
             if (y < 0) {
                 y = 0;
             }
+            if (y > aboutPrefixWidth) {
+                niceVersion = aboutPrefix + niceVersion;
+                y -= aboutPrefixWidth;
+            }
+            aboutOfset = new Point(y, fm.getHeight());
+            Stroke backup = g2d.getStroke();
+            g2d.setStroke(dashed);
+            g2d.drawRect(aboutOfset.x-1,1, master.getSplashWidth()-aboutOfset.x-1, aboutOfset.y+1);
+            g2d.setStroke(backup);
             g2d.drawString(niceVersion, y, fm.getHeight());
         }
         return fm;
@@ -543,11 +572,29 @@ public class BasePainter implements Observer {
 
                 @Override
                 public void run() {
+                    ExtensionManager.getExtension().animate();
                     master.repaint();
                 }
             });
         } catch (Exception ex) {
-            ex.printStackTrace();
+            OutputController.getLogger().log(ex);
         }
     }
+
+    public BasicComponentSplashScreen getMaster() {
+        return master;
+    }
+
+    public Point getAboutOfset() {
+        return aboutOfset;
+    }
+
+    public Color getWaterColor() {
+        return waterColor;
+    }
+
+    public Color getBackgroundColor() {
+        return backgroundColor;
+    }
+
 }

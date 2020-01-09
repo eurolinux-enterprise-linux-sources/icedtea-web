@@ -58,6 +58,7 @@ import net.sourceforge.jnlp.runtime.Translator;
 import net.sourceforge.jnlp.security.KeyStores;
 import net.sourceforge.jnlp.security.viewer.CertificatePane;
 import net.sourceforge.jnlp.util.ImageResources;
+import net.sourceforge.jnlp.util.logging.OutputController;
 
 /**
  * This is the control panel for Java. It provides a GUI for modifying the
@@ -119,11 +120,10 @@ public class ControlPanel extends JFrame {
         add(buttonPanel, BorderLayout.PAGE_END);
         setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
         pack();
-        setMinimumSize(getPreferredSize());
     }
 
     private JPanel createTopPanel() {
-        Font currentFont = null;
+        Font currentFont;
         JLabel about = new JLabel(R("CPMainDescriptionShort"));
         currentFont = about.getFont();
         about.setFont(currentFont.deriveFont(currentFont.getSize2D() + 2));
@@ -149,7 +149,7 @@ public class ControlPanel extends JFrame {
             URL imgUrl = cl.getResource("net/sourceforge/jnlp/resources/netx-icon.png");
             image.setIcon(new ImageIcon(ImageIO.read(imgUrl)));
         } catch (IOException e) {
-            e.printStackTrace();
+            OutputController.getLogger().log(OutputController.Level.ERROR_ALL, e);
         }
 
         JPanel topPanel = new JPanel(new BorderLayout());
@@ -167,8 +167,8 @@ public class ControlPanel extends JFrame {
                 || validationResult.id == JvmValidationResult.STATE.NOT_VALID_DIR
                 || validationResult.id == JvmValidationResult.STATE.NOT_VALID_JDK) {
             return JOptionPane.showConfirmDialog(ControlPanel.this,
-                    "<html>"+Translator.R("CPJVMNotokMessage1", s)+"<br>"
-                    + validationResult.formattedText+"<br>"
+                    "<html>"+Translator.R("CPJVMNotokMessage1", s)+"<br/>"
+                    + validationResult.formattedText+"<br/>"
                     + Translator.R("CPJVMNotokMessage2", DeploymentConfiguration.KEY_JRE_DIR, DeploymentConfiguration.USER_DEPLOYMENT_PROPERTIES_FILE)+"</html>",
                     Translator.R("CPJVMconfirmInvalidJdkTitle"),JOptionPane.OK_CANCEL_OPTION);
         }
@@ -263,7 +263,8 @@ public class ControlPanel extends JFrame {
                 // new SettingsPanel(Translator.R("CPTabRuntimes"), createRuntimesSettingsPanel()),
                 new SettingsPanel(Translator.R("CPTabSecurity"), createSecuritySettingsPanel()),
                 //todo refactor to work with tmp file and apply as asu designed it
-                new SettingsPanel(Translator.R("APPEXTSECControlPanelExtendedAppletSecurityTitle"), new UnsignedAppletsTrustingListPanel(DeploymentConfiguration.getAppletTrustGlobalSettingsPath(),DeploymentConfiguration.getAppletTrustUserSettingsPath(), this.config) )
+                new SettingsPanel(Translator.R("CPTabPolicy"), createPolicySettingsPanel()),
+                new SettingsPanel(Translator.R("APPEXTSECControlPanelExtendedAppletSecurityTitle"), new UnsignedAppletsTrustingListPanel(DeploymentConfiguration.getAppletTrustGlobalSettingsPath(), DeploymentConfiguration.getAppletTrustUserSettingsPath(), this.config))
         };
 
         // Add panels.
@@ -275,10 +276,12 @@ public class ControlPanel extends JFrame {
         for (SettingsPanel panel : panels) {
             JPanel p = panel.getPanel();
             Dimension d = p.getMinimumSize();
-            if (d.height > height)
+            if (d.height > height) {
                 height = d.height;
-            if (d.width > width)
+            }
+            if (d.width > width) {
                 width = d.width;
+            }
         }
         Dimension dim = new Dimension(width, height);
 
@@ -299,7 +302,7 @@ public class ControlPanel extends JFrame {
             }
         });
         JScrollPane settingsListScrollPane = new JScrollPane(settingsList);
-        settingsListScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
+        settingsListScrollPane.setHorizontalScrollBarPolicy(JScrollPane.HORIZONTAL_SCROLLBAR_AS_NEEDED);
 
         final JPanel settingsDetailPanel = new JPanel();
         settingsDetailPanel.setLayout(new BorderLayout());
@@ -354,6 +357,10 @@ public class ControlPanel extends JFrame {
         return new SecuritySettingsPanel(this.config);
     }
 
+    private JPanel createPolicySettingsPanel() {
+        return new PolicyPanel(this, this.config);
+    }
+
     private JPanel createJVMSettingsPanel() {
         return new JVMPanel(this.config);
     }
@@ -361,7 +368,8 @@ public class ControlPanel extends JFrame {
     /**
      * This is a placeholder panel.
      * 
-     * @return
+     * @return a placeholder panel
+     * @see JPanel
      */
     private JPanel createNotImplementedPanel() {
 
@@ -381,7 +389,7 @@ public class ControlPanel extends JFrame {
             JLabel label = new JLabel("Not Implemented", icon, SwingConstants.CENTER);
             notImplementedPanel.add(label);
         } catch (IOException e) {
-            e.printStackTrace();
+            OutputController.getLogger().log(OutputController.Level.ERROR_ALL, e);
         }
         return notImplementedPanel;
     }
@@ -393,12 +401,13 @@ public class ControlPanel extends JFrame {
         try {
             config.save();
         } catch (IOException e) {
-            e.printStackTrace();
+            OutputController.getLogger().log(OutputController.Level.ERROR_ALL, e);
             JOptionPane.showMessageDialog(this, e);
         }
     }
 
     public static void main(String[] args) throws Exception {
+        DeploymentConfiguration.move14AndOlderFilesTo15StructureCatched();
         final DeploymentConfiguration config = new DeploymentConfiguration();
         try {
             config.load();
@@ -409,7 +418,7 @@ public class ControlPanel extends JFrame {
 
             // if configuration is not loaded, we will get NullPointerExceptions
             // everywhere
-            e.printStackTrace();
+            OutputController.getLogger().log(OutputController.Level.ERROR_ALL, e);
         }
 
         try {
