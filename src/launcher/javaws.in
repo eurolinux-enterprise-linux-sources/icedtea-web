@@ -5,8 +5,24 @@ LAUNCHER_BOOTCLASSPATH=@LAUNCHER_BOOTCLASSPATH@
 LAUNCHER_FLAGS=-Xms8m
 CLASSNAME=net.sourceforge.jnlp.runtime.Boot
 BINARY_LOCATION=@JAVAWS_BIN_LOCATION@
+SPLASH_LOCATION=@JAVAWS_SPLASH_LOCATION@
 PROGRAM_NAME=javaws
 CP=@JRE@/lib/rt.jar
+
+PROPERTY_NAME=deployment.jre.dir
+CUSTOM_JRE_REGEX="^$PROPERTY_NAME *= *"
+CUSTOM_JRE=`grep "$CUSTOM_JRE_REGEX" ~/.icedtea/deployment.properties 2>/dev/null |  sed "s/$CUSTOM_JRE_REGEX//g"`
+if [ "x$CUSTOM_JRE" = "x" ] ; then
+  CUSTOM_JRE=`grep "$CUSTOM_JRE_REGEX" /etc/.java/.deploy/deployment.properties 2>/dev/null |  sed "s/$CUSTOM_JRE_REGEX//g"`
+fi;
+if [ "x$CUSTOM_JRE" != "x" ] ; then
+  if [ -e  "$CUSTOM_JRE" -a -e "$CUSTOM_JRE/bin/java" -a -e "$CUSTOM_JRE/lib/rt.jar" ] ; then
+    JAVA=$CUSTOM_JRE/bin/java
+    CP=$CUSTOM_JRE/lib/rt.jar
+  else
+    echo "Your custom JRE $CUSTOM_JRE read from deployment.properties under key $PROPERTY_NAME as $CUSTOM_JRE is not valid. Using default ($JAVA, $CP) in attempt to start. Please fix this."
+  fi
+fi;
 
 JAVA_ARGS=( )
 ARGS=( )
@@ -15,6 +31,10 @@ COMMAND=()
 i=0
 j=0
 
+SPLASH="false"
+if [ "x$ICEDTEA_WEB_SPLASH" = "x" ] ; then
+SPLASH="true"
+fi;
 while [ "$#" -gt "0" ]; do
   case "$1" in
     -J*)
@@ -24,6 +44,9 @@ while [ "$#" -gt "0" ]; do
     *)
       ARGS[$j]="$1"
       j=$((j+1))
+      if [ "$1" = "-headless" ] ; then
+        SPLASH="false"
+      fi
       ;;
   esac
   shift
@@ -32,6 +55,10 @@ done
 k=0
 COMMAND[k]="${JAVA}"
 k=$((k+1))
+if [ "$SPLASH" = "true" ] ; then
+COMMAND[k]="-splash:${SPLASH_LOCATION}"
+k=$((k+1))
+fi;
 COMMAND[k]="${LAUNCHER_BOOTCLASSPATH}"
 k=$((k+1))
 COMMAND[k]="${LAUNCHER_FLAGS}"
@@ -59,6 +86,6 @@ while [ "$j" -lt "${#ARGS[@]}" ]; do
   k=$((k+1))
 done
 
-"${COMMAND[@]}"
+exec -a "javaws" "${COMMAND[@]}"
 
 exit $?

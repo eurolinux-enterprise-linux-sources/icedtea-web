@@ -149,6 +149,9 @@ public class SecurityDesc {
      * @param downloadHost the download host (can always connect to)
      */
     public SecurityDesc(JNLPFile file, Object type, String downloadHost) {
+        if (file == null) {
+            throw new NullJnlpFileException();
+        }
         this.file = file;
         this.type = type;
         this.downloadHost = downloadHost;
@@ -202,7 +205,7 @@ public class SecurityDesc {
         PermissionCollection permissions = getSandBoxPermissions();
 
         // discard sandbox, give all
-        if (type == ALL_PERMISSIONS) {
+        if (ALL_PERMISSIONS.equals(type)) {
             permissions = new Permissions();
             if (customTrustedPolicy == null) {
                 permissions.add(new AllPermission());
@@ -213,7 +216,7 @@ public class SecurityDesc {
         }
 
         // add j2ee to sandbox if needed
-        if (type == J2EE_PERMISSIONS)
+        if (J2EE_PERMISSIONS.equals(type))
             for (int i = 0; i < j2eePermissions.length; i++)
                 permissions.add(j2eePermissions[i]);
 
@@ -233,12 +236,18 @@ public class SecurityDesc {
         if (grantAwtPermissions) {
             permissions.add(new AWTPermission("showWindowWithoutWarningBanner"));
         }
+        if (JNLPRuntime.isWebstartApplication()) {
+            if (file == null) {
+                throw new NullJnlpFileException("Can not return sandbox permissions, file is null");
+            }
+            if (file.isApplication()) {
+                for (int i = 0; i < jnlpRIAPermissions.length; i++) {
+                    permissions.add(jnlpRIAPermissions[i]);
+                }
+            }
+        }
 
-        if (file.isApplication())
-            for (int i = 0; i < jnlpRIAPermissions.length; i++)
-                permissions.add(jnlpRIAPermissions[i]);
-
-        if (downloadHost != null)
+        if (downloadHost != null && downloadHost.length() > 0)
             permissions.add(new SocketPermission(downloadHost,
                                                  "connect, accept"));
 

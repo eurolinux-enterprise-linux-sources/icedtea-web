@@ -1,59 +1,37 @@
 
+# We require at the least the first release java-1.6.0-openjdk 
+# with IcedTea6 1.10
+%define min_openjdk_version 1:1.6.0.0-60
 %define multilib_arches ppc64 sparc64 x86_64
 
 # Version of java
 %define javaver 1.7.0
 
 # Alternatives priority
-%define priority        16000
+%define priority 17000
 
-%ifarch %{ix86}
-%define archbuild i586
-%define archinstall i386
-%endif
-%ifarch x86_64
-%define archbuild amd64
-%define archinstall amd64
-%endif
-# 32 bit sparc, optimized for v9
-%ifarch sparcv9
-%define archbuild sparc
-%define archinstall sparc
-%endif
-# 64 bit sparc
-%ifarch sparc64
-%define archbuild sparcv9
-%define archinstall sparcv9
-%endif
 
+%define javadir     %{_jvmdir}/java-openjdk
+%define jredir      %{_jvmdir}/jre-openjdk
 %ifarch %{multilib_arches}
-%define javadir        %{_jvmdir}/java-%{javaver}-openjdk.%{_arch}
-%define jredir         %{_jvmdir}/jre-%{javaver}-openjdk.%{_arch}
-%define jre6dir         %{_jvmdir}/jre-1.6.0-openjdk.%{_arch}
-%define javaplugin     libjavaplugin.so.%{_arch}
+%define jre6dir     %{_jvmdir}/jre-1.6.0-openjdk.%{_arch}
+%define javaplugin  libjavaplugin.so.%{_arch}
 %else
-%define javadir        %{_jvmdir}/java-%{javaver}-openjdk
-%define jredir         %{_jvmdir}/jre-%{javaver}-openjdk
-%define jre6dir         %{_jvmdir}/jre-1.6.0-openjdk
-%define javaplugin      libjavaplugin.so
+%define jre6dir     %{_jvmdir}/jre-1.6.0-openjdk
+%define javaplugin  libjavaplugin.so
 %endif
 
 %define binsuffix      .itweb
 
 Name:		icedtea-web
-Version:	1.2.3
-Release:	4%{?dist}
-Summary:	Additional Java components for OpenJDK
+Version:	1.4.1
+Release:	0%{?dist}
+Summary:	Additional Java components for OpenJDK - Java browser plug-in and Web Start implementation
 
-Group:		Applications/Internet
-License:	LGPLv2+ and GPLv2 with exceptions
-URL:		http://icedtea.classpath.org/wiki/IcedTea-Web
-
-# hg clone http://icedtea.classpath.org/hg/release/icedtea-web-1.2 -r c959afd1eba7
-Source0:	http://icedtea.classpath.org/download/source/%{name}-%{version}.tar.gz
-
-Patch1:		b25-appContextFix.patch
-
+Group:      Applications/Internet
+License:    LGPLv2+ and GPLv2 with exceptions
+URL:        http://icedtea.classpath.org/wiki/IcedTea-Web
+Source0:    http://icedtea.classpath.org/download/source/%{name}-%{version}.tar.gz
 
 BuildRoot:	%(mktemp -ud %{_tmppath}/%{name}-%{version}-%{release}-XXXXXX)
 
@@ -61,11 +39,13 @@ BuildRequires:  java-%{javaver}-openjdk-devel
 BuildRequires:  desktop-file-utils
 BuildRequires:  gecko-devel
 BuildRequires:  glib2-devel
-BuildRequires:  gtk2-devel
+BuildRequires:  autoconf
+BuildRequires:  automake
 BuildRequires:  xulrunner-devel
+BuildRequires:  junit4
 
 # For functionality and the OpenJDK dirs
-Requires:	    java-%{javaver}-openjdk
+Requires:      java-%{javaver}-openjdk
 
 # For the mozilla plugin dir
 Requires:       mozilla-filesystem%{?_isa}
@@ -81,7 +61,7 @@ Provides: java-plugin = 1:%{javaver}
 Provides: javaws      = 1:%{javaver}
 
 Provides:   java-%{javaver}-openjdk-plugin =  1:%{version}
-Obsoletes:  java-1.6.0-openjdk-plugin
+Obsoletes:  java-1.6.0-openjdk-plugin <= %{min_openjdk_version}
 
 ExclusiveArch: x86_64 i686
 
@@ -95,14 +75,14 @@ implementations.
 Summary:    API documentation for IcedTea-Web
 Group:      Documentation
 Requires:   %{name} = %{version}-%{release}
+Requires:   jpackage-utils
+BuildArch:  noarch
 
 %description javadoc
 This package contains Javadocs for the IcedTea-Web project.
 
 %prep
 %setup -q
-
-%patch1 -p1
 
 %build
 ./configure \
@@ -113,7 +93,6 @@ This package contains Javadocs for the IcedTea-Web project.
     --libdir=%{_libdir} \
     --program-suffix=%{binsuffix} \
     --prefix=%{_prefix}
-
 make
 
 %install
@@ -130,62 +109,39 @@ desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications javaws.desktop
 desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications itweb-settings.desktop
+ln -s  %{_mandir}/man1/javaws-itweb.1   $RPM_BUILD_ROOT/%{_mandir}/man1/icedtea-web.1
 
-# Link to .so file from JRE_HOME as plug-in is bound to a specific version
-install -dm 755 $RPM_BUILD_ROOT%{jredir}/lib/%{archinstall}/
-ln -s %{_libdir}/IcedTeaPlugin.so \
-	$RPM_BUILD_ROOT%{jredir}/lib/%{archinstall}/IcedTeaPlugin.so
+%check
+#make check
 
 %clean
 rm -rf $RPM_BUILD_ROOT
 
 %post
-update-desktop-database &> /dev/null || :
-MAKE_THIS_DEFAULT=0
-if [ $1 -gt 1 ] # update
-then
-
-# Is the previous one set as a maual alternative?
-alternatives --display %{javaplugin} | head -n 1 | grep -q "status is auto"
-if [ $? -ne 0 ]; then # If not 1, it is manual
-  alternatives --display %{javaplugin} | grep "link currently points to" | grep -q "%{jre6dir}/lib/%{archinstall}/IcedTeaPlugin.so$"
-  if [ $? -eq 0 ]; then
-    MAKE_THIS_DEFAULT=1
-  fi
-fi
-
-alternatives --remove %{javaplugin} \
-  %{jre6dir}/lib/%{archinstall}/IcedTeaPlugin.so 2>/dev/null  	
-
-fi
 alternatives \
   --install %{_libdir}/mozilla/plugins/libjavaplugin.so %{javaplugin} \
-  %{jredir}/lib/%{archinstall}/IcedTeaPlugin.so %{priority} \
+  %{_libdir}/IcedTeaPlugin.so %{priority} \
   --slave %{_bindir}/javaws javaws %{_prefix}/bin/javaws%{binsuffix} \
   --slave %{_mandir}/man1/javaws.1.gz javaws.1.gz \
   %{_mandir}/man1/javaws-itweb.1.gz
 
-
-# Gracefully update to this one if needed
-if [ $MAKE_THIS_DEFAULT -eq 1 ]; then
-alternatives --set %{javaplugin} %{jredir}/lib/%{archinstall}/IcedTeaPlugin.so
-fi
+%posttrans
+update-desktop-database &> /dev/null || :
 
 exit 0
 
 %postun
+update-desktop-database &> /dev/null || :
 if [ $1 -eq 0 ]
-  then
-    update-desktop-database &> /dev/null || :
-    alternatives --remove %{javaplugin} \
-      %{jredir}/lib/%{archinstall}/IcedTeaPlugin.so
- fi
-exit 0
+then
+  alternatives --remove %{javaplugin} \
+    %{_libdir}/IcedTeaPlugin.so
+fi
 
+exit 0
 
 %files
 %defattr(-,root,root,-)
-%{jredir}/lib/%{archinstall}/*
 %{_prefix}/bin/*
 %{_libdir}/IcedTeaPlugin.so
 %{_datadir}/applications/*
@@ -197,39 +153,43 @@ exit 0
 %files javadoc
 %defattr(-,root,root,-)
 %{_datadir}/javadoc/%{name}
+%doc COPYING
 
 %changelog
-* Wed Jun 19 2013 Jiri Vanek <jvanek@redhat.com> 1.2.3-4
-- improved patch1 b25-appContextFix.patch to make it run with future openjdk better
-- Resolves: rhbz#975426
+* Wed Jul 10 2013 Jiri Vanek <jvanek@redhat.com> 1.4.1-0
+- updated to 1.4.1
+- add icedtea-web man page
+- removed upstreamed  patch1 b25-appContextFix.patch
+- Resolves: rhbz#916161
 
-* Tue Jun 18 2013 Jiri Vanek <jvanek@redhat.com> 1.2.3-3
+* Wed Jul 10 2013 Jiri Vanek <jvanek@redhat.com> 1.4.0-2
+- cleaned specfile
+- Resolves: rhbz#916161
+
+* Wed Jul 10 2013 Jiri Vanek <jvanek@redhat.com> 1.4.0-1
 - added patch1 b25-appContextFix.patch to make it run with future openjdk
-- rmeoved posttrans
-- Resolves: rhbz#975426
+- Resolves: rhbz#975098
 
-* Fri Apr 12 2013 Jiri Vanek <jvanek@redhat.com> 1.2.3-2
-- Added (temporally!) posttrans forcing creation of symlinks
-  - should be removed next release
-- Resolves: rhbz#949094
+* Fri Jun 07 2013 Jiri Vanek <jvanek@redhat.com> 1.4-0
+- Updated to 1.4
+- See announcement for detail
+ - http://mail.openjdk.java.net/pipermail/distro-pkg-dev/2013-May/023195.html
+- Resolves: rhbz#916161
 
-* Fri Apr 12 2013 Jiri Vanek <jvanek@redhat.com> 1.2.3-1
-- fixed postun - removal of alternatives for plugin restricted to 
-  (correct) removal process only
-- fixed date in changelog previous entry
-- Resolves: rhbz#949094
-
-* Thu Apr 11 2013 Jiri Vanek <jvanek@redhat.com> 1.2.3-0
-- Updated to latest ustream release of 1.2 branch - 1.2.3
- - Security Updates
-  - CVE-2013-1927, RH884705 - fixed gifar vulnerability
+* Wed Apr 17 2013 Jiri Vanek <jvanek@redhat.com> 1.3.2-0
+- Updated to icedtea-web 1.3.2 - see RHBZ 916161 for details
+- this update contains security fixes:
+  - CVE-2013-1927, RH884705: fixed gifar vulnerability
   - CVE-2013-1926, RH916774: Class-loader incorrectly shared for applets with same relative-path.
- - Common
-  - PR1161: X509VariableTrustManager does not work correctly with OpenJDK7
- - Plugin
-  - PR1157: Applets can hang browser after fatal exception
-- Removed upstreamed patch 0- icedtea-web-PR1161.patch
-- Resolves: rhbz#949094
+-Common
+  - Added new option in itw-settings which allows users to set JVM arguments when plugin is initialized.
+- NetX
+  - PR580: http://www.horaoficial.cl/ loads improperly
+- Plugin
+   PR1260: IcedTea-Web should not rely on GTK
+   PR1157: Applets can hang browser after fatal exceptio
+- and much more since 1.3, over 1.3.1
+- Resolves: rhbz#949095
 
 * Fri Dec 07 2012 Jiri Vanek <jvanek@redhat.com> 1.2.2-3
 - Fixed provides and obsolates

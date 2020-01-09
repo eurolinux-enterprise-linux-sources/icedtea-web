@@ -17,7 +17,6 @@
 package net.sourceforge.jnlp.runtime;
 
 import java.awt.EventQueue;
-import java.awt.Image;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
@@ -116,9 +115,6 @@ public class JNLPRuntime {
     /** update policy that controls when to check for updates */
     private static UpdatePolicy updatePolicy = UpdatePolicy.ALWAYS;
 
-    /** netx window icon */
-    private static Image windowIcon = null;
-
     /** whether initialized */
     private static boolean initialized = false;
 
@@ -196,6 +192,7 @@ public class JNLPRuntime {
 
         try {
             config.load();
+            config.copyTo(System.getProperties());
         } catch (ConfigurationException e) {
             /* exit if there is a fatal exception loading the configuration */
             if (isApplication) {
@@ -218,17 +215,14 @@ public class JNLPRuntime {
         if (headless == false)
             checkHeadless();
 
-        if (!headless && windowIcon == null)
-            loadWindowIcon();
-
         if (!headless && indicator == null)
             indicator = new DefaultDownloadIndicator();
 
         if (handler == null) {
             if (headless) {
-                handler = new DefaultLaunchHandler();
+                handler = new DefaultLaunchHandler(System.err);
             } else {
-                handler = new GuiLaunchHandler();
+                handler = new GuiLaunchHandler(System.err);
             }
         }
 
@@ -240,7 +234,7 @@ public class JNLPRuntime {
         try {
             UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
         } catch (Exception e) {
-            // ignore it
+            e.printStackTrace();
         }
 
         doMainAppContextHacks();
@@ -409,24 +403,6 @@ public class JNLPRuntime {
      */
     public static boolean isWebstartApplication() {
         return isWebstartApplication;
-    }
-
-    /**
-     * Returns the window icon.
-     */
-    public static Image getWindowIcon() {
-        return windowIcon;
-    }
-
-    /**
-     * Sets the window icon that is displayed in Java applications
-     * and applets instead of the default Java icon.
-     *
-     * @throws IllegalStateException if caller is not the exit class
-     */
-    public static void setWindowIcon(Image image) {
-        checkExitClass();
-        windowIcon = image;
     }
 
     /**
@@ -698,22 +674,6 @@ public class JNLPRuntime {
     }
 
     /**
-     * Load the window icon.
-     */
-    private static void loadWindowIcon() {
-        if (windowIcon != null)
-            return;
-
-        try {
-            windowIcon = new javax.swing.ImageIcon((new sun.misc.Launcher())
-                        .getClassLoader().getResource("net/sourceforge/jnlp/resources/netx-icon.png")).getImage();
-        } catch (Exception ex) {
-            if (JNLPRuntime.isDebug())
-                ex.printStackTrace();
-        }
-    }
-
-    /**
      * @return true if running on Windows
      */
     public static boolean isWindows() {
@@ -786,7 +746,7 @@ public class JNLPRuntime {
             e.printStackTrace();
         }
 
-        Runtime.getRuntime().addShutdownHook(new Thread() {
+        Runtime.getRuntime().addShutdownHook(new Thread("JNLPRuntimeShutdownHookThread") {
             public void run() {
                 markNetxStopped();
                 CacheUtil.cleanCache();

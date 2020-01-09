@@ -24,17 +24,16 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.io.UnsupportedEncodingException;
 import java.net.HttpURLConnection;
 import java.net.MalformedURLException;
 import java.net.URL;
 import java.net.URLConnection;
-import java.net.URLDecoder;
-import java.net.URLEncoder;
 import java.security.AccessController;
 import java.security.PrivilegedAction;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.jar.JarOutputStream;
 import java.util.jar.Pack200;
@@ -46,6 +45,8 @@ import net.sourceforge.jnlp.Version;
 import net.sourceforge.jnlp.event.DownloadEvent;
 import net.sourceforge.jnlp.event.DownloadListener;
 import net.sourceforge.jnlp.runtime.JNLPRuntime;
+import net.sourceforge.jnlp.util.HttpUtils;
+import net.sourceforge.jnlp.util.UrlUtils;
 import net.sourceforge.jnlp.util.WeakList;
 
 /**
@@ -111,17 +112,11 @@ public class ResourceTracker {
     private static final int ERROR = Resource.ERROR;
     private static final int STARTED = Resource.STARTED;
 
-    // normalization of url
-    private static final char PATH_DELIMITER_MARK = '/';
-    private static final String PATH_DELIMITER = "" + PATH_DELIMITER_MARK;
-    private static final char QUERY_DELIMITER_MARK = '&';
-    private static final String QUERY_DELIMITER = "" + QUERY_DELIMITER_MARK;
-    private static final char QUERY_MARK = '?';
-    private static final char HREF_MARK = '#';
-    private static final String UTF8 = "utf-8";
-
     /** max threads */
     private static final int maxThreads = 5;
+    
+    /** methods used to try individual URLs when choosing best*/
+    private static final String[] requestMethods = {"HEAD", "GET"};
 
     /** running threads */
     private static int threads = 0;
@@ -184,9 +179,9 @@ public class ResourceTracker {
      */
     public void addResource(URL location, Version version, DownloadOptions options, UpdatePolicy updatePolicy) {
         if (location == null)
-            throw new IllegalArgumentException("location==null");
+            throw new IllegalResourceDescriptorException("location==null");
         try {
-            location = normalizeUrl(location, JNLPRuntime.isDebug());
+            location = UrlUtils.normalizeUrl(location);
         } catch (Exception ex) {
             System.err.println("Normalization of " + location.toString() + " have failed");
             ex.printStackTrace();
@@ -225,7 +220,7 @@ public class ResourceTracker {
      * not required as resources are reclaimed when the tracker is
      * collected.
      *
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      */
     public void removeResource(URL location) {
         synchronized (resources) {
@@ -331,13 +326,13 @@ public class ResourceTracker {
         }
 
         DownloadEvent event = new DownloadEvent(this, resource);
-        for (int i = 0; i < l.length; i++) {
+        for (DownloadListener dl : l) {
             if (0 != ((ERROR | DOWNLOADED) & status))
-                l[i].downloadCompleted(event);
+                dl.downloadCompleted(event);
             else if (0 != (DOWNLOADING & status))
-                l[i].downloadStarted(event);
+                dl.downloadStarted(event);
             else if (0 != (CONNECTING & status))
-                l[i].updateStarted(event);
+                dl.updateStarted(event);
         }
     }
 
@@ -351,7 +346,7 @@ public class ResourceTracker {
      *
      * @param location the resource location
      * @return the resource, or null if it could not be downloaded
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      * @see CacheUtil#isCacheable
      */
     public URL getCacheURL(URL location) {
@@ -378,7 +373,7 @@ public class ResourceTracker {
      *
      * @param location the resource location
      * @return a local file containing the resource, or null
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      * @see CacheUtil#isCacheable
      */
     public File getCacheFile(URL location) {
@@ -394,7 +389,7 @@ public class ResourceTracker {
                 return resource.localFile;
 
             if (location.getProtocol().equalsIgnoreCase("file")) {
-                File file = new File(location.getFile());
+                File file = UrlUtils.decodeUrlAsFile(location);
                 if (file.exists())
                     return file;
             }
@@ -418,7 +413,7 @@ public class ResourceTracker {
      * the cache.
      *
      * @throws IOException if there was an error opening the stream
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      */
     public InputStream getInputStream(URL location) throws IOException {
         try {
@@ -442,15 +437,16 @@ public class ResourceTracker {
      * @param urls the resources to wait for
      * @param timeout the time in ms to wait before returning, 0 for no timeout
      * @return whether the resources downloaded before the timeout
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      */
     public boolean waitForResources(URL urls[], long timeout) throws InterruptedException {
         Resource resources[] = new Resource[urls.length];
 
         synchronized (resources) {
             // keep the lock so getResource doesn't have to aquire it each time
-            for (int i = 0; i < urls.length; i++)
+            for (int i = 0; i < urls.length; i++) {
                 resources[i] = getResource(urls[i]);
+            }
         }
 
         if (resources.length > 0)
@@ -467,7 +463,7 @@ public class ResourceTracker {
      * @param timeout the timeout, or 0 to wait until completed
      * @return whether the resource downloaded before the timeout
      * @throws InterruptedException if another thread interrupted the wait
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      */
     public boolean waitForResource(URL location, long timeout) throws InterruptedException {
         return wait(new Resource[] { getResource(location) }, timeout);
@@ -478,7 +474,7 @@ public class ResourceTracker {
      *
      * @param location the resource location
      * @return the number of bytes transferred
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      */
     public long getAmountRead(URL location) {
         // not atomic b/c transferred is a long, but so what (each
@@ -490,7 +486,7 @@ public class ResourceTracker {
      * Returns whether a resource is available for use (ie, can be
      * accessed with the getCacheFile method).
      *
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      */
     public boolean checkResource(URL location) {
         return getResource(location).isSet(DOWNLOADED | ERROR); // isSet atomic
@@ -504,7 +500,7 @@ public class ResourceTracker {
      * resource at a time to conserve system resources.
      *
      * @return true if the resource is already downloaded (or an error occurred)
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      */
     public boolean startResource(URL location) {
         Resource resource = getResource(location);
@@ -517,7 +513,7 @@ public class ResourceTracker {
      * enqueues the resource if not already started.
      *
      * @return true if the resource is already downloaded (or an error occurred)
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      */
     private boolean startResource(Resource resource) {
         boolean enqueue = false;
@@ -549,7 +545,7 @@ public class ResourceTracker {
      *
      * @param location the resource location
      * @return the number of bytes, or -1
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      */
     public long getTotalSize(URL location) {
         return getResource(location).size; // atomic
@@ -565,7 +561,7 @@ public class ResourceTracker {
         if (threads < maxThreads) {
             threads++;
 
-            Thread thread = new Thread(new Downloader());
+            Thread thread = new Thread(new Downloader(), "DownloaderThread" + threads);
             thread.start();
         }
     }
@@ -605,7 +601,7 @@ public class ResourceTracker {
     private void queueResource(Resource resource) {
         synchronized (lock) {
             if (!resource.isSet(CONNECT | DOWNLOAD))
-                throw new IllegalArgumentException("Invalid resource state (resource: " + resource + ")");
+                throw new IllegalResourceDescriptorException("Invalid resource state (resource: " + resource + ")");
 
             queue.add(resource);
             startThread();
@@ -791,6 +787,12 @@ public class ResourceTracker {
 
             // connect
             URL finalLocation = findBestUrl(resource);
+
+            if (finalLocation == null) {
+                System.err.println("Attempted to download " + resource.location + ", but failed to connect!");
+                throw new NullPointerException("finalLocation == null"); // Caught below
+            }
+
             resource.setDownloadLocation(finalLocation);
             URLConnection connection = finalLocation.openConnection(); // this won't change so should be okay unsynchronized
             connection.addRequestProperty("Accept-Encoding", "pack200-gzip, gzip");
@@ -849,14 +851,46 @@ public class ResourceTracker {
             entry.unlock();
         }
     }
+    /**
+     * Connects to the given URL, and grabs a response code if the URL uses
+     * the HTTP protocol, or returns an arbitrary valid HTTP response code.
+     * 
+     * @return the response code if HTTP connection, or HttpURLConnection.HTTP_OK if not.
+     * @throws IOException
+     */
+     static int getUrlResponseCode(URL url, Map<String, String> requestProperties, String requestMethod) throws IOException {
+        URLConnection connection = url.openConnection();
+
+        for (Map.Entry<String, String> property : requestProperties.entrySet()){
+            connection.addRequestProperty(property.getKey(), property.getValue());
+        }
+
+        if (connection instanceof HttpURLConnection) {
+            HttpURLConnection httpConnection = (HttpURLConnection)connection;
+            httpConnection.setRequestMethod(requestMethod);
+
+            int responseCode = httpConnection.getResponseCode();
+
+            /* Fully consuming current request helps with connection re-use 
+             * See http://docs.oracle.com/javase/1.5.0/docs/guide/net/http-keepalive.html */
+            HttpUtils.consumeAndCloseConnectionSilently(httpConnection);
+
+            return responseCode;
+        }
+
+        return HttpURLConnection.HTTP_OK /* return a valid response code */;
+    }
+
 
     /**
-     * Returns the best URL to use for downloading the resource
+     * Returns the 'best' valid URL for the given resource.
+     * This first adjusts the file name to take into account file versioning
+     * and packing, if possible.
      *
      * @param resource the resource
-     * @return a URL or null
+     * @return the best URL, or null if all failed to resolve
      */
-    private URL findBestUrl(Resource resource) {
+     URL findBestUrl(Resource resource) {
         DownloadOptions options = downloadOptions.get(resource);
         if (options == null) {
             options = new DownloadOptions(false, false);
@@ -867,30 +901,37 @@ public class ResourceTracker {
             System.err.println("All possible urls for " +
                     resource.toString() + " : " + urls);
         }
-        URL bestUrl = null;
-        for (int i = 0; i < urls.size(); i++) {
-            URL url = urls.get(i);
-            try {
-                URLConnection connection = url.openConnection();
-                connection.addRequestProperty("Accept-Encoding", "pack200-gzip, gzip");
-                if (connection instanceof HttpURLConnection) {
-                    HttpURLConnection con = (HttpURLConnection)connection;
-                    int responseCode = con.getResponseCode();
-                    if (responseCode == -1 || responseCode < 200 || responseCode >= 300) {
-                        continue;
-                    }
-                }
-                if (JNLPRuntime.isDebug()) {
-                    System.err.println("best url for " + resource.toString() + " is " + url.toString());
-                }
-                bestUrl = url;
-                break;
-            } catch (IOException e) {
-                // continue
-            }
-        }
 
-        return bestUrl;
+         for (String requestMethod : requestMethods) {
+             for (URL url : urls) {
+                 try {
+                     Map<String, String> requestProperties = new HashMap<String, String>();
+                     requestProperties.put("Accept-Encoding", "pack200-gzip, gzip");
+
+                     int responseCode = getUrlResponseCode(url, requestProperties, requestMethod);
+
+                     if (responseCode < 200 || responseCode >= 300) {
+                         if (JNLPRuntime.isDebug()) {
+                             System.err.println("For "+resource.toString()+" the server returned " + responseCode + " code for "+requestMethod+" request for " + url.toExternalForm());
+                         }
+                     }else {
+                         if (JNLPRuntime.isDebug()) {
+                             System.err.println("best url for " + resource.toString() + " is " + url.toString() + " by " + requestMethod);
+                         }
+                         return url; /* This is the best URL */
+                     } 
+                 } catch (IOException e) {
+                     // continue to next candidate
+                     if (JNLPRuntime.isDebug()) {
+                         System.err.println("While processing " + url.toString() + " by " + requestMethod + " for resource " + resource.toString() + " got " + e + ": ");
+                         e.printStackTrace();
+                     }
+                 }
+             }
+         }
+
+        /* No valid URL, return null */
+        return null;
     }
 
     /**
@@ -999,8 +1040,7 @@ public class ResourceTracker {
         Resource result = null;
         int score = Integer.MAX_VALUE;
 
-        for (int i = 0; i < source.size(); i++) {
-            Resource resource = source.get(i);
+        for (Resource resource : source) {
             boolean selectable = false;
 
             synchronized (resource) {
@@ -1011,9 +1051,10 @@ public class ResourceTracker {
             if (selectable) {
                 int activeCount = 0;
 
-                for (int j = 0; j < active.size(); j++)
-                    if (active.get(j) == resource.getTracker())
+                for (ResourceTracker rt : active) {
+                    if (rt == resource.getTracker())
                         activeCount++;
+                }
 
                 // try to spread out the downloads so that a slow host
                 // won't monopolize the downloads
@@ -1030,19 +1071,17 @@ public class ResourceTracker {
     /**
      * Return the resource matching the specified URL.
      *
-     * @throws IllegalArgumentException if the resource is not being tracked
+     * @throws IllegalResourceDescriptorException if the resource is not being tracked
      */
     private Resource getResource(URL location) {
         synchronized (resources) {
-            for (int i = 0; i < resources.size(); i++) {
-                Resource resource = resources.get(i);
-
+            for (Resource resource : resources) {
                 if (CacheUtil.urlEquals(resource.location, location))
                     return resource;
             }
         }
 
-        throw new IllegalArgumentException("Location does not specify a resource being tracked.");
+        throw new IllegalResourceDescriptorException("Location does not specify a resource being tracked.");
     }
 
     /**
@@ -1058,8 +1097,9 @@ public class ResourceTracker {
         long startTime = System.currentTimeMillis();
 
         // start them downloading / connecting in background
-        for (int i = 0; i < resources.length; i++)
-            startResource(resources[i]);
+        for (Resource resource : resources) {
+            startResource(resource);
+        }
 
         // wait for completion
         while (true) {
@@ -1067,11 +1107,11 @@ public class ResourceTracker {
 
             synchronized (lock) {
                 // check for completion
-                for (int i = 0; i < resources.length; i++) {
+                for (Resource resource : resources) {
                     //NetX Deadlocking may be solved by removing this
                     //synch block.
-                    synchronized (resources[i]) {
-                        if (!resources[i].isSet(DOWNLOADED | ERROR)) {
+                    synchronized (resource) {
+                        if (!resource.isSet(DOWNLOADED | ERROR)) {
                             finished = false;
                             break;
                         }
@@ -1143,116 +1183,4 @@ public class ResourceTracker {
             // selectNextResource();
         }
     };
-
-    private static String normalizeChunk(String base, boolean debug) throws UnsupportedEncodingException {
-        if (base == null) {
-            return base;
-        }
-        if ("".equals(base)) {
-            return base;
-        }
-        String result = base;
-        String ssE = URLDecoder.decode(base, UTF8);
-        //            System.out.println("*" + base + "*");
-        //            System.out.println("-" + ssE + "-");
-        if (base.equals(ssE)) {
-            result = URLEncoder.encode(base, UTF8);
-            if (debug) {
-                System.out.println(base + " chunk needs to be encoded => " + result);
-            }
-        } else {
-            if (debug) {
-                System.out.println(base + " chunk already encoded");
-            }
-        }
-        return result;
-    }
-
-    public static URL normalizeUrl(URL u, boolean debug) throws MalformedURLException, UnsupportedEncodingException {
-        if (u == null) {
-            return null;
-        }
-        String protocol = u.getProtocol();
-        if (protocol == null || "file".equals(protocol)) {
-            return u;
-        }
-        String file = u.getPath();
-        if (file == null) {
-            return u;
-        }
-        String host = u.getHost();
-        String ref = u.getRef();
-        int port = u.getPort();
-        String query = u.getQuery();
-        String[] qq = {};
-        if (query != null) {
-            qq = query.split(QUERY_DELIMITER);
-        }
-        String[] ss = file.split(PATH_DELIMITER);
-        int normalized = 0;
-        if (debug) {
-            System.out.println("normalizing path " + file + " in " + u.toString());
-        }
-        for (int i = 0; i < ss.length; i++) {
-            String base = ss[i];
-            String r = normalizeChunk(base, debug);
-            if (!r.equals(ss[i])) {
-                normalized++;
-            }
-            ss[i] = r;
-        }
-        if (debug) {
-            System.out.println("normalizing query " + query + " in " + u.toString());
-        }
-        for (int i = 0; i < qq.length; i++) {
-            String base = qq[i];
-            String r = normalizeChunk(base, debug);
-            if (!r.equals(qq[i])) {
-                normalized++;
-            }
-            qq[i] = r;
-        }
-        if (normalized == 0) {
-            if (debug) {
-                System.out.println("Nothing was normalized in this url");
-            }
-            return u;
-        } else {
-            if (debug) {
-                System.out.println(normalized + " chunks normalized, rejoining url");
-            }
-        }
-        StringBuilder composed = new StringBuilder("");
-        for (int i = 0; i < ss.length; i++) {
-            String string = ss[i];
-            if (ss.length <= 1 || (string != null && !"".equals(string))) {
-                composed.append(PATH_DELIMITER_MARK).append(string);
-            }
-        }
-        String composed1 = composed.toString();
-        if (query != null && !query.trim().equals("")) {
-            composed.append(QUERY_MARK);
-            for (int i = 0; i < qq.length; i++) {
-                String string = qq[i];
-                if ((string != null && !"".equals(string))) {
-                    composed.append(string);
-                    if (i != qq.length - 1) {
-                        composed.append(QUERY_DELIMITER_MARK);
-                    }
-                }
-            }
-        }
-        String composed2 = composed.substring(composed1.length() - 1);
-        if (ref != null && !ref.trim().equals("")) {
-            composed.append(HREF_MARK).append(ref);
-        }
-
-        URL result = new URL(protocol, host, port, composed.toString());
-
-        if (debug) {
-            System.out.println("normalized `" + composed1 + "` and `" + composed2 + "` in " + result.toString());
-        }
-        return result;
-
-    }
 }

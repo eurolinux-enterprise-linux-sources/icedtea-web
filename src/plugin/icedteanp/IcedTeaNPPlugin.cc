@@ -43,35 +43,18 @@ exception statement from your version. */
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <string>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+//IcedTea-plugin includes
+#include "IcedTeaPluginUtils.h"
+#include "IcedTeaParseProperties.h"
 // Liveconnect extension
 #include "IcedTeaScriptablePluginObject.h"
 #include "IcedTeaNPPlugin.h"
 
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-// Documentbase retrieval includes.
-#include <nsIPluginInstance.h>
-#include <nsIPluginInstancePeer.h>
-#include <nsIPluginTagInfo2.h>
-
-// API's into Mozilla
-#include <nsCOMPtr.h>
-#include <nsICookieService.h>
-#include <nsIDNSRecord.h>
-#include <nsIDNSService.h>
-#include <nsINetUtil.h>
-#include <nsIProxyInfo.h>
-#include <nsIProtocolProxyService.h>
-#include <nsIScriptSecurityManager.h>
-#include <nsIIOService.h>
-#include <nsIURI.h>
-#include <nsNetCID.h>
-#include <nsStringAPI.h>
-#include <nsServiceManagerUtils.h>
-#endif
 
 // Error reporting macros.
 #define PLUGIN_ERROR(message)                                       \
@@ -148,16 +131,12 @@ exception statement from your version. */
 #define FAILURE_MESSAGE "icedteanp plugin error: Failed to run %s." \
   "  For more detail rerun \"firefox -g\" in a terminal window."
 
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-// Documentbase retrieval required definition.
-static NS_DEFINE_IID (kIPluginTagInfo2IID, NS_IPLUGINTAGINFO2_IID);
-#endif
-
 // Data directory for plugin.
-static gchar* data_directory = NULL;
+static std::string data_directory;
 
-// Fully-qualified appletviewer executable.
-static gchar* appletviewer_executable = NULL;
+// Fully-qualified appletviewer default  executable and rt.jar
+static const char* appletviewer_default_executable = ICEDTEA_WEB_JRE "/bin/java";
+static const char* appletviewer_default_rtjar = ICEDTEA_WEB_JRE "/lib/rt.jar";
 
 // Applet viewer input channel (needs to be static because it is used in plugin_in_pipe_callback)
 static GIOChannel* in_from_appletviewer = NULL;
@@ -204,22 +183,12 @@ PluginRequestProcessor* plugin_req_proc;
 // Sends messages to Java over the bus
 JavaMessageSender* java_req_proc;
 
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-// Documentbase retrieval type-punning union.
-typedef union
-{
-  void** void_field;
-  nsIPluginTagInfo2** info_field;
-} info_union;
-#endif
 
 // Static instance helper functions.
 // Have the browser allocate a new ITNPPluginData structure.
 static void plugin_data_new (ITNPPluginData** data);
 // Retrieve the current document's documentbase.
 static gchar* plugin_get_documentbase (NPP instance);
-// Notify the user that the appletviewer is not installed correctly.
-static void plugin_display_failure_dialog ();
 // Callback used to monitor input pipe status.
 static gboolean plugin_in_pipe_callback (GIOChannel* source,
                                          GIOCondition condition,
@@ -229,8 +198,7 @@ static gboolean plugin_out_pipe_callback (GIOChannel* source,
                                           GIOCondition condition,
                                           gpointer plugin_data);
 static NPError plugin_start_appletviewer (ITNPPluginData* data);
-static gchar* plugin_create_applet_tag (int16_t argc, char* argn[],
-                                        char* argv[]);
+std::string plugin_parameters_string (int argc, char* argn[], char* argv[]);
 static void plugin_stop_appletviewer ();
 // Uninitialize ITNPPluginData structure
 static void plugin_data_destroy (NPP instance);
@@ -243,6 +211,8 @@ static void appletviewer_monitor(GPid pid, gint status, gpointer data);
 void plugin_send_initialization_message(char* instance, gulong handle,
                                                int width, int height,
                                                char* url);
+/* Returns JVM options set in itw-settings */
+std::vector<std::string*>* get_jvm_args();
 
 // Global instance counter.
 // Mutex to protect plugin_instance_counter.
@@ -285,6 +255,32 @@ g_strcmp0(char *str1, char *str2)
 
 #endif
 
+static std::string get_plugin_executable(){
+      std::string custom_jre;
+      bool custom_jre_defined = find_custom_jre(custom_jre);
+      if (custom_jre_defined) {
+            if (IcedTeaPluginUtilities::file_exists(custom_jre+"/bin/java")){
+                  return custom_jre+"/bin/java";
+            } else {
+                 fprintf(stderr, "Your custom jre (/bin/java check) %s is not valid. Please fix %s in your %s. In attempt to run using default one. \n", custom_jre.c_str(), custom_jre_key.c_str(), default_file_ITW_deploy_props_name.c_str());
+            }
+      }
+      return appletviewer_default_executable;      
+}
+
+static std::string get_plugin_rt_jar(){
+      std::string custom_jre;
+      bool custom_jre_defined = find_custom_jre(custom_jre);
+      if (custom_jre_defined) {
+            if (IcedTeaPluginUtilities::file_exists(custom_jre+"/lib/rt.jar")){
+                  return custom_jre+"/lib/rt.jar";
+            } else {
+                  fprintf(stderr, "Your custom jre (/lib/rt.jar check) %s is not valid. Please fix %s in your %s. In attempt to run using default one. \n", custom_jre.c_str(), custom_jre_key.c_str(), default_file_ITW_deploy_props_name.c_str());
+            }
+      }
+      return appletviewer_default_rtjar;      
+}
+
 
 /* 
  * Find first member in GHashTable* depending on version of glib
@@ -313,7 +309,7 @@ gpointer getFirstInTableInstance(GHashTable* table)
 
 // Creates a new icedtea np plugin instance.  This function creates a
 // ITNPPluginData* and stores it in instance->pdata.  The following
-// ITNPPluginData fiels are initialized: instance_id, in_pipe_name,
+// ITNPPluginData fields are initialized: instance_id, in_pipe_name,
 // in_from_appletviewer, in_watch_source, out_pipe_name,
 // out_to_appletviewer, out_watch_source, appletviewer_mutex, owner,
 // appletviewer_alive.  In addition two pipe files are created.  All
@@ -347,7 +343,6 @@ ITNP_New (NPMIMEType pluginType, NPP instance, uint16_t mode,
 
   gchar* documentbase = NULL;
   gchar* read_message = NULL;
-  gchar* applet_tag = NULL;
   gchar* cookie_info = NULL;
 
   NPObject* npPluginObj = NULL;
@@ -395,11 +390,10 @@ ITNP_New (NPMIMEType pluginType, NPP instance, uint16_t mode,
   documentbase = plugin_get_documentbase (instance);
   if (documentbase && argc != 0)
     {
-      // Send applet tag message to appletviewer.
-      applet_tag = plugin_create_applet_tag (argc, argn, argv);
+      // Send parameters to appletviewer.
+      std::string params_string = plugin_parameters_string(argc, argn, argv);
 
-      data->applet_tag = (gchar*) malloc(strlen(applet_tag)*sizeof(gchar) + strlen(documentbase)*sizeof(gchar) + 32);
-      g_sprintf(data->applet_tag, "tag %s %s", documentbase, applet_tag);
+      data->parameters_string =  g_strdup_printf("tag %s %s", documentbase, params_string.c_str());
 
       data->is_applet_instance = true;
     }
@@ -424,33 +418,7 @@ ITNP_New (NPMIMEType pluginType, NPP instance, uint16_t mode,
 
   instance->pdata = data;
 
-  goto cleanup_done;
-
- cleanup_appletviewer_mutex:
-  g_mutex_free (data->appletviewer_mutex);
-  data->appletviewer_mutex = NULL;
-
-  // cleanup_instance_string:
-  g_free (data->instance_id);
-  data->instance_id = NULL;
-
-  // cleanup applet tag:
-  g_free (data->applet_tag);
-  data->applet_tag = NULL;
-
-  // cleanup_data:
-  // Eliminate back-pointer to plugin instance.
-  data->owner = NULL;
-  (*browser_functions.memfree) (data);
-  data = NULL;
-
-  // Initialization failed so return a NULL pointer for the browser
-  // data.
-  instance->pdata = NULL;
-
  cleanup_done:
-  g_free (applet_tag);
-  applet_tag = NULL;
   g_free (read_message);
   read_message = NULL;
   g_free (documentbase);
@@ -496,7 +464,7 @@ void start_jvm_if_needed()
 
   // in_pipe_name
   in_pipe_name = g_strdup_printf ("%s/%d-icedteanp-appletviewer-to-plugin",
-                                         data_directory, getpid());
+                                         data_directory.c_str(), getpid());
   if (!in_pipe_name)
     {
       PLUGIN_ERROR ("Failed to create input pipe name.");
@@ -523,7 +491,7 @@ void start_jvm_if_needed()
 
   // out_pipe_name
   out_pipe_name = g_strdup_printf ("%s/%d-icedteanp-plugin-to-appletviewer",
-                                         data_directory, getpid());
+                                         data_directory.c_str(), getpid());
 
   if (!out_pipe_name)
     {
@@ -834,7 +802,7 @@ ITNP_SetWindow (NPP instance, NPWindow* window)
       // Now we have everything. Send this data to the Java side
       plugin_send_initialization_message(
     		  data->instance_id, (gulong) data->window_handle,
-    		  data->window_width, data->window_height, data->applet_tag);
+    		  data->window_width, data->window_height, data->parameters_string);
 
       g_mutex_unlock (data->appletviewer_mutex);
 
@@ -930,38 +898,6 @@ get_cookie_info(const char* siteAddr, char** cookieString, uint32_t* len)
   {
     return NPERR_GENERIC_ERROR;
   }
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-  nsresult rv;
-  nsCOMPtr<nsIScriptSecurityManager> sec_man =
-    do_GetService(NS_SCRIPTSECURITYMANAGER_CONTRACTID, &rv);
-
-  if (!sec_man) {
-    return NPERR_GENERIC_ERROR;
-  }
-
-  nsCOMPtr<nsIIOService> io_svc = do_GetService("@mozilla.org/network/io-service;1", &rv);
-
-  if (NS_FAILED(rv) || !io_svc) {
-    return NPERR_GENERIC_ERROR;
-  }
-
-  nsCOMPtr<nsIURI> uri;
-  io_svc->NewURI(nsCString(siteAddr), NULL, NULL, getter_AddRefs(uri));
-
-  nsCOMPtr<nsICookieService> cookie_svc = do_GetService("@mozilla.org/cookieService;1", &rv);
-
-  if (NS_FAILED(rv) || !cookie_svc) {
-    return NPERR_GENERIC_ERROR;
-  }
-
-  rv = cookie_svc->GetCookieString(uri, NULL, cookieString);
-
-  if (NS_FAILED(rv) || !*cookieString) {
-    return NPERR_GENERIC_ERROR;
-  }
-
-#else
-
   // getvalueforurl needs an NPP instance. Quite frankly, there is no easy way
   // to know which instance needs the information, as applets on Java side can
   // be multi-threaded and the thread making a proxy.cookie request cannot be
@@ -980,9 +916,22 @@ get_cookie_info(const char* siteAddr, char** cookieString, uint32_t* len)
       return NPERR_GENERIC_ERROR;
   }
 
-#endif
-
   return NPERR_NO_ERROR;
+}
+
+static NPError
+set_cookie_info(const char* siteAddr, const char* cookieString, uint32_t len)
+{
+  // Only attempt to perform this operation if there is a valid plugin instance
+  if (g_hash_table_size(instance_to_id_map) > 0 && browser_functions.getvalueforurl)
+  {
+      // We arbitrarily use the first valid instance we can grab
+      // For an explanation of the logic behind this, see get_cookie_info
+      gpointer instance = getFirstInTableInstance(instance_to_id_map);
+      return browser_functions.setvalueforurl((NPP) instance, NPNURLVCookie, siteAddr, cookieString, len);
+  }
+
+  return NPERR_GENERIC_ERROR;;
 }
 
 // HELPER FUNCTIONS
@@ -1007,71 +956,7 @@ plugin_data_new (ITNPPluginData** data)
 // Documentbase retrieval.  This function gets the current document's
 // documentbase.  This function relies on browser-private data so it
 // will only work when the plugin is loaded in a Mozilla-based
-// browser.  We could not find a way to retrieve the documentbase
-// using the original Netscape plugin API so we use the XPCOM API
-// instead.
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-static gchar*
-plugin_get_documentbase (NPP instance)
-{
-  PLUGIN_DEBUG ("plugin_get_documentbase\n");
-
-  nsIPluginInstance* xpcom_instance = NULL;
-  nsIPluginInstancePeer* peer = NULL;
-  nsresult result = 0;
-  nsIPluginTagInfo2* pluginTagInfo2 = NULL;
-  info_union u = { NULL };
-  char const* documentbase = NULL;
-  gchar* documentbase_copy = NULL;
-
-  xpcom_instance = (nsIPluginInstance*) (instance->ndata);
-  if (!xpcom_instance)
-    {
-      PLUGIN_ERROR ("xpcom_instance is NULL.");
-      goto cleanup_done;
-    }
-
-  xpcom_instance->GetPeer (&peer);
-  if (!peer)
-    {
-      PLUGIN_ERROR ("peer is NULL.");
-      goto cleanup_done;
-    }
-
-  u.info_field = &pluginTagInfo2;
-
-  result = peer->QueryInterface (kIPluginTagInfo2IID,
-                                 u.void_field);
-  if (result || !pluginTagInfo2)
-    {
-      PLUGIN_ERROR ("pluginTagInfo2 retrieval failed.");
-      goto cleanup_peer;
-    }
-
-  pluginTagInfo2->GetDocumentBase (&documentbase);
-
-  if (!documentbase)
-    {
-      // NULL => dummy instantiation for LiveConnect
-      goto cleanup_plugintaginfo2;
-    }
-
-  documentbase_copy = g_strdup (documentbase);
-
-  // Release references.
- cleanup_plugintaginfo2:
-  NS_RELEASE (pluginTagInfo2);
-
- cleanup_peer:
-  NS_RELEASE (peer);
-
- cleanup_done:
-  PLUGIN_DEBUG ("plugin_get_documentbase return\n");
-
-  PLUGIN_DEBUG("plugin_get_documentbase returning: %s\n", documentbase_copy);
-  return documentbase_copy;
-}
-#else
+// browser.
 static gchar*
 plugin_get_documentbase (NPP instance)
 {
@@ -1099,55 +984,17 @@ plugin_get_documentbase (NPP instance)
                                href_id, &href);
 
   std::string href_str = IcedTeaPluginUtilities::NPVariantAsString(href);
-
-  // Strip everything after the last "/"
-  gchar** parts = g_strsplit (href_str.c_str(), "/", -1);
-  guint parts_sz = g_strv_length (parts);
-
-  std::string location_str;
-  for (int i=0; i < parts_sz - 1; i++)
-  {
-      location_str += parts[i];
-      location_str += "/";
-  }
-
-  documentbase_copy = g_strdup (location_str.c_str());
+  documentbase_copy = g_strdup (href_str.c_str());
 
   // Release references.
   browser_functions.releasevariantvalue(&href);
   browser_functions.releasevariantvalue(&location);
-  g_strfreev(parts);
  cleanup_done:
   PLUGIN_DEBUG ("plugin_get_documentbase return\n");
   PLUGIN_DEBUG("plugin_get_documentbase returning: %s\n", documentbase_copy);
 
   return documentbase_copy;
 }
-#endif
-
-// This function displays an error message if the appletviewer has not
-// been installed correctly.
-static void
-plugin_display_failure_dialog ()
-{
-  GtkWidget* dialog = NULL;
-
-  PLUGIN_DEBUG ("plugin_display_failure_dialog\n");
-
-  dialog = gtk_message_dialog_new (NULL,
-                                   GTK_DIALOG_DESTROY_WITH_PARENT,
-                                   GTK_MESSAGE_ERROR,
-                                   GTK_BUTTONS_CLOSE,
-                                   FAILURE_MESSAGE,
-                                   appletviewer_executable);
-  gtk_widget_show_all (dialog);
-  gtk_dialog_run (GTK_DIALOG (dialog));
-  gtk_widget_destroy (dialog);
-
-  PLUGIN_DEBUG ("plugin_display_failure_dialog return\n");
-}
-
-
 
 // plugin_in_pipe_callback is called when data is available on the
 // input pipe, or when the appletviewer crashes or is killed.  It may
@@ -1202,6 +1049,95 @@ plugin_in_pipe_callback (GIOChannel* source,
   return keep_installed;
 }
 
+static
+void consume_plugin_message(gchar* message) {
+  // internal plugin related message
+  gchar** parts = g_strsplit (message, " ", 5);
+  if (g_str_has_prefix(parts[1], "PluginProxyInfo"))
+  {
+    gchar* proxy = NULL;
+    uint32_t len;
+
+    gchar* decoded_url = (gchar*) calloc(strlen(parts[4]) + 1, sizeof(gchar));
+    IcedTeaPluginUtilities::decodeURL(parts[4], &decoded_url);
+    PLUGIN_DEBUG("parts[0]=%s, parts[1]=%s, reference, parts[3]=%s, parts[4]=%s -- decoded_url=%s\n", parts[0], parts[1], parts[3], parts[4], decoded_url);
+
+    gchar* proxy_info;
+
+    proxy_info = g_strconcat ("plugin PluginProxyInfo reference ", parts[3], " ", NULL);
+    if (get_proxy_info(decoded_url, &proxy, &len) == NPERR_NO_ERROR)
+      {
+        proxy_info = g_strconcat (proxy_info, proxy, NULL);
+      }
+
+    PLUGIN_DEBUG("Proxy info: %s\n", proxy_info);
+    plugin_send_message_to_appletviewer(proxy_info);
+
+    free(decoded_url);
+    decoded_url = NULL;
+    g_free(proxy_info);
+    proxy_info = NULL;
+
+    g_free(proxy);
+    proxy = NULL;
+
+  } else if (g_str_has_prefix(parts[1], "PluginCookieInfo"))
+  {
+    gchar* decoded_url = (gchar*) calloc(strlen(parts[4])+1, sizeof(gchar));
+    IcedTeaPluginUtilities::decodeURL(parts[4], &decoded_url);
+
+    gchar* cookie_info = g_strconcat ("plugin PluginCookieInfo reference ", parts[3], " ", NULL);
+    gchar* cookie_string = NULL;
+    uint32_t len;
+    if (get_cookie_info(decoded_url, &cookie_string, &len) == NPERR_NO_ERROR)
+    {
+        cookie_info = g_strconcat (cookie_info, cookie_string, NULL);
+    }
+
+    PLUGIN_DEBUG("Cookie info: %s\n", cookie_info);
+    plugin_send_message_to_appletviewer(cookie_info);
+
+    free(decoded_url);
+    decoded_url = NULL;
+    g_free(cookie_info);
+    cookie_info = NULL;
+    g_free(cookie_string);
+    cookie_string = NULL;
+  } else if (g_str_has_prefix(parts[1], "PluginSetCookie"))
+  {
+    // Message structure: plugin PluginSetCookie reference -1 <url> <cookie>
+    gchar** cookie_parts = g_strsplit (message, " ", 6);
+
+    if (g_strv_length(cookie_parts) < 6)
+    {
+       g_strfreev (parts);
+       g_strfreev (cookie_parts);
+       return; // Defensive, message _should_ be properly formatted
+    }
+
+    gchar* decoded_url = (gchar*) calloc(strlen(cookie_parts[4])+1, sizeof(gchar));
+    IcedTeaPluginUtilities::decodeURL(cookie_parts[4], &decoded_url);
+
+    gchar* cookie_string = cookie_parts[5];
+    uint32_t len = strlen(cookie_string);
+    if (set_cookie_info(decoded_url, cookie_string, len) == NPERR_NO_ERROR)
+    {
+  	  PLUGIN_DEBUG("Setting cookie for URL %s to %s\n", decoded_url, cookie_string);
+    } else
+    {
+  	  PLUGIN_DEBUG("Not able to set cookie for URL %s to %s\n", decoded_url, cookie_string);
+    }
+
+    free(decoded_url);
+    decoded_url = NULL;
+    g_strfreev (cookie_parts);
+    cookie_parts = NULL;
+  }
+
+  g_strfreev (parts);
+  parts = NULL;
+}
+
 void consume_message(gchar* message) {
 
 	PLUGIN_DEBUG ("  PIPE: plugin read: %s\n", message);
@@ -1231,9 +1167,9 @@ void consume_message(gchar* message) {
         {
 
           // clear the "instance X status" parts
-          sprintf(parts[0], "");
-          sprintf(parts[1], "");
-          sprintf(parts[2], "");
+          strcpy(parts[0], "");
+          strcpy(parts[1], "");
+          strcpy(parts[2], "");
 
           // join the rest
           gchar* status_message = g_strjoinv(" ", parts);
@@ -1264,68 +1200,13 @@ void consume_message(gchar* message) {
     }
   else if (g_str_has_prefix (message, "plugin "))
     {
-      // internal plugin related message
-      gchar** parts = g_strsplit (message, " ", 5);
-      if (g_str_has_prefix(parts[1], "PluginProxyInfo"))
-      {
-        gchar* proxy;
-        uint32_t len;
-
-        gchar* decoded_url = (gchar*) calloc(strlen(parts[4]) + 1, sizeof(gchar));
-        IcedTeaPluginUtilities::decodeURL(parts[4], &decoded_url);
-        PLUGIN_DEBUG("parts[0]=%s, parts[1]=%s, reference, parts[3]=%s, parts[4]=%s -- decoded_url=%s\n", parts[0], parts[1], parts[3], parts[4], decoded_url);
-
-        gchar* proxy_info;
-
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-	proxy = (char*) malloc(sizeof(char)*2048);
-#endif
-
-        proxy_info = g_strconcat ("plugin PluginProxyInfo reference ", parts[3], " ", NULL);
-        if (get_proxy_info(decoded_url, &proxy, &len) == NPERR_NO_ERROR)
-          {
-            proxy_info = g_strconcat (proxy_info, proxy, NULL);
-          }
-
-        PLUGIN_DEBUG("Proxy info: %s\n", proxy_info);
-        plugin_send_message_to_appletviewer(proxy_info);
-
-        g_free(decoded_url);
-        decoded_url = NULL;
-        g_free(proxy_info);
-        proxy_info = NULL;
-
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-	g_free(proxy);
-	proxy = NULL;
-#endif
-
-      } else if (g_str_has_prefix(parts[1], "PluginCookieInfo"))
-      {
-        gchar* decoded_url = (gchar*) calloc(strlen(parts[4])+1, sizeof(gchar));
-        IcedTeaPluginUtilities::decodeURL(parts[4], &decoded_url);
-
-        gchar* cookie_info = g_strconcat ("plugin PluginCookieInfo reference ", parts[3], " ", NULL);
-        gchar* cookie_string;
-        uint32_t len;
-        if (get_cookie_info(decoded_url, &cookie_string, &len) == NPERR_NO_ERROR)
-        {
-            cookie_info = g_strconcat (cookie_info, cookie_string, NULL);
-        }
-
-        PLUGIN_DEBUG("Cookie info: %s\n", cookie_info);
-        plugin_send_message_to_appletviewer(cookie_info);
-
-        g_free(decoded_url);
-        decoded_url = NULL;
-        g_free(cookie_info);
-        cookie_info = NULL;
-      }
+        consume_plugin_message(message);
     }
   else
     {
         g_print ("  Unable to handle message: %s\n", message);
     }
+
 }
 
 void get_instance_from_id(int id, NPP& instance)
@@ -1350,76 +1231,6 @@ get_proxy_info(const char* siteAddr, char** proxy, uint32_t* len)
   {
 	  return NPERR_GENERIC_ERROR;
   }
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-  nsresult rv;
-
-  // Initialize service variables
-  nsCOMPtr<nsIProtocolProxyService> proxy_svc = do_GetService("@mozilla.org/network/protocol-proxy-service;1", &rv);
-
-  if (!proxy_svc) {
-      printf("Cannot initialize proxy service\n");
-      return NPERR_GENERIC_ERROR;
-  }
-
-  nsCOMPtr<nsIIOService> io_svc = do_GetService("@mozilla.org/network/io-service;1", &rv);
-
-  if (NS_FAILED(rv) || !io_svc) {
-    printf("Cannot initialize io service\n");
-    return NPERR_GENERIC_ERROR;
-  }
-
-  // uri which needs to be accessed
-  nsCOMPtr<nsIURI> uri;
-  io_svc->NewURI(nsCString(siteAddr), NULL, NULL, getter_AddRefs(uri));
-
-  // find the proxy address if any
-  nsCOMPtr<nsIProxyInfo> info;
-  proxy_svc->Resolve(uri, 0, getter_AddRefs(info));
-
-  // if there is no proxy found, return immediately
-  if (!info) {
-     PLUGIN_DEBUG("%s does not need a proxy\n", siteAddr);
-     return NPERR_GENERIC_ERROR;
-  }
-
-  // if proxy info is available, extract it
-  nsCString phost;
-  PRInt32 pport;
-  nsCString ptype;
-
-  info->GetHost(phost);
-  info->GetPort(&pport);
-  info->GetType(ptype);
-
-  // resolve the proxy address to an IP
-  nsCOMPtr<nsIDNSService> dns_svc = do_GetService("@mozilla.org/network/dns-service;1", &rv);
-
-  if (!dns_svc) {
-      printf("Cannot initialize DNS service\n");
-      return NPERR_GENERIC_ERROR;
-  }
-
-  nsCOMPtr<nsIDNSRecord> record;
-  dns_svc->Resolve(phost, 0U, getter_AddRefs(record));
-
-  // TODO: Add support for multiple ips
-  nsDependentCString ipAddr;
-  record->GetNextAddrAsString(ipAddr);
-
-  if (!strcmp(ptype.get(), "http"))
-  {
-      snprintf(*proxy, sizeof(char)*1024, "%s %s:%d", "PROXY", ipAddr.get(), pport);
-  } else
-  {
-      snprintf(*proxy, sizeof(char)*1024, "%s %s:%d", "SOCKS", ipAddr.get(), pport);
-  }
-
-  *len = strlen(*proxy);
-
-  PLUGIN_DEBUG("Proxy info for %s: %s\n", siteAddr, *proxy);
-
-#else
-
   if (browser_functions.getvalueforurl)
   {
 
@@ -1430,7 +1241,6 @@ get_proxy_info(const char* siteAddr, char** proxy, uint32_t* len)
   {
       return NPERR_GENERIC_ERROR;
   }
-#endif
 
   return NPERR_NO_ERROR;
 }
@@ -1530,13 +1340,14 @@ plugin_filter_environment(void)
 static NPError
 plugin_test_appletviewer ()
 {
-  PLUGIN_DEBUG ("plugin_test_appletviewer: %s\n", appletviewer_executable);
+
+  PLUGIN_DEBUG ("plugin_test_appletviewer: %s\n", get_plugin_executable().c_str());
   NPError error = NPERR_NO_ERROR;
 
   gchar* command_line[3] = { NULL, NULL, NULL };
   gchar** environment;
 
-  command_line[0] = g_strdup (appletviewer_executable);
+  command_line[0] = g_strdup (get_plugin_executable().c_str());
   command_line[1] = g_strdup("-version");
   command_line[2] = NULL;
 
@@ -1577,48 +1388,53 @@ plugin_start_appletviewer (ITNPPluginData* data)
   PLUGIN_DEBUG ("plugin_start_appletviewer\n");
   NPError error = NPERR_NO_ERROR;
 
-  gchar** command_line;
-  gchar** environment;
+  std::vector<std::string> command_line;
+  gchar** environment = NULL;
+  std::vector<std::string*>* jvm_args = get_jvm_args();
 
-  int cmd_num = 0;
-  if (plugin_debug)
+  // Construct command line parameters
+
+  command_line.push_back(get_plugin_executable());
+
+  //Add JVM args to command_line
+  for (int i = 0; i < jvm_args->size(); i++)
   {
-      command_line = (gchar**) malloc(sizeof(gchar*)*11);
-      command_line[cmd_num++] = g_strdup(appletviewer_executable);
-      command_line[cmd_num++] = g_strdup(PLUGIN_BOOTCLASSPATH);
-      // set the classpath to avoid using the default (cwd).
-      command_line[cmd_num++] = g_strdup("-classpath");
-      command_line[cmd_num++] = g_strdup_printf("%s/lib/rt.jar", ICEDTEA_WEB_JRE);
-      command_line[cmd_num++] = g_strdup("-Xdebug");
-      command_line[cmd_num++] = g_strdup("-Xnoagent");
-      if (plugin_debug_suspend)
-      {
-          command_line[cmd_num++] = g_strdup("-Xrunjdwp:transport=dt_socket,address=8787,server=y,suspend=y");
-      } else
-      {
-          command_line[cmd_num++] = g_strdup("-Xrunjdwp:transport=dt_socket,address=8787,server=y,suspend=n");
-      }
-      command_line[cmd_num++] = g_strdup("sun.applet.PluginMain");
-      command_line[cmd_num++] = g_strdup(out_pipe_name);
-      command_line[cmd_num++] = g_strdup(in_pipe_name);
-      command_line[cmd_num] = NULL;
-  } else
-  {
-      command_line = (gchar**) malloc(sizeof(gchar*)*8);
-      command_line[cmd_num++] = g_strdup(appletviewer_executable);
-      command_line[cmd_num++] = g_strdup(PLUGIN_BOOTCLASSPATH);
-      command_line[cmd_num++] = g_strdup("-classpath");
-      command_line[cmd_num++] = g_strdup_printf("%s/lib/rt.jar", ICEDTEA_WEB_JRE);
-      command_line[cmd_num++] = g_strdup("sun.applet.PluginMain");
-      command_line[cmd_num++] = g_strdup(out_pipe_name);
-      command_line[cmd_num++] = g_strdup(in_pipe_name);
-      command_line[cmd_num] = NULL;
+    command_line.push_back(*jvm_args->at(i));
   }
 
-  environment = plugin_filter_environment();
+  command_line.push_back(PLUGIN_BOOTCLASSPATH);
+  // set the classpath to avoid using the default (cwd).
+  command_line.push_back("-classpath");
+  command_line.push_back(get_plugin_rt_jar());
 
-  if (!g_spawn_async (NULL, command_line, environment,
-		      (GSpawnFlags) G_SPAWN_DO_NOT_REAP_CHILD,
+  // Enable coverage agent if we are running instrumented plugin
+#ifdef COVERAGE_AGENT
+  command_line.push_back(COVERAGE_AGENT);
+#endif
+
+  if (plugin_debug)
+  {
+    command_line.push_back("-Xdebug");
+    command_line.push_back("-Xnoagent");
+
+    //Debug flags
+    std::string debug_flags = "-Xrunjdwp:transport=dt_socket,address=8787,server=y,";
+    debug_flags += plugin_debug_suspend ? "suspend=y" : "suspend=n";
+    command_line.push_back(debug_flags);
+  }
+
+  command_line.push_back("sun.applet.PluginMain");
+  command_line.push_back(out_pipe_name);
+  command_line.push_back(in_pipe_name);
+
+  // Finished command line parameters
+
+  environment = plugin_filter_environment();
+  std::vector<gchar*> vector_gchar = IcedTeaPluginUtilities::vectorStringToVectorGchar(&command_line);
+  gchar **command_line_args = &vector_gchar[0];
+
+  if (!g_spawn_async (NULL, command_line_args, environment,
+                     (GSpawnFlags) G_SPAWN_DO_NOT_REAP_CHILD,
                       NULL, NULL, &appletviewer_pid, &channel_error))
     {
       if (channel_error)
@@ -1633,15 +1449,11 @@ plugin_start_appletviewer (ITNPPluginData* data)
       error = NPERR_GENERIC_ERROR;
     }
 
-  g_strfreev (environment);
-
-  for (int i = 0; i < cmd_num; i++) {
-    g_free (command_line[i]);
-    command_line[i] = NULL;
-  }
-
-  g_free(command_line);
-  command_line = NULL;
+  //Free memory
+  g_strfreev(environment);
+  IcedTeaPluginUtilities::freeStringPtrVector(jvm_args);
+  jvm_args = NULL;
+  command_line_args = NULL;
 
   if (appletviewer_pid)
     {
@@ -1655,158 +1467,82 @@ plugin_start_appletviewer (ITNPPluginData* data)
 }
 
 /*
- * Replaces certain characters (\r, \n, etc) with HTML escape equivalents.
- *
- * Return string is allocated on the heap. Caller assumes responsibility 
- * for freeing the memory via free()
+ * Returns JVM options set in itw-settings
  */
-static char*
-encode_string(char* to_encode)
+std::vector<std::string*>*
+get_jvm_args()
 {
+  std::string output;
+  std::vector<std::string*>* tokenOutput = NULL;
+  bool args_defined = read_deploy_property_value("deployment.plugin.jvm.arguments", output);
+  if (!args_defined){
+    return new std::vector<std::string*>();
+  }
+  tokenOutput = IcedTeaPluginUtilities::strSplit(output.c_str(), " \n");
+  return tokenOutput;
+}
 
-  // Do nothing for an empty string
-  if (to_encode == '\0')
-      return to_encode;
 
-  // worst case scenario -> all characters are newlines or
-  // returns, each of which translates to 5 substitutions
-  char* encoded = (char*) calloc(((strlen(to_encode)*5)+1), sizeof(char));
+/*
+ * Escape characters for passing to Java.
+ * "\n" for new line, "\\" for "\", "\:" for ";"
+ */
+std::string
+escape_parameter_string(const char* to_encode) {
+  std::string encoded;
 
-  strcpy(encoded, "");
-
-  for (int i=0; i < strlen(to_encode); i++)
+  if (to_encode == NULL)
   {
-      if (to_encode[i] == '\r')
-          encoded = strcat(encoded, "&#13;");
-      else if (to_encode[i] == '\n')
-          encoded = strcat(encoded, "&#10;");
-      else if (to_encode[i] == '>')
-          encoded = strcat(encoded, "&gt;");
-      else if (to_encode[i] == '<')
-          encoded = strcat(encoded, "&lt;");
-      else if (to_encode[i] == '&')
-          encoded = strcat(encoded, "&amp;");
-      else if (to_encode[i] == '"')
-          encoded = strcat(encoded, "&quot;");
+      return encoded;
+  }
+
+  size_t length = strlen(to_encode);
+  for (int i = 0; i < length; i++)
+  {
+      if (to_encode[i] == '\n')
+          encoded += "\\n";
+      else if (to_encode[i] == '\\')
+    	  encoded += "\\\\";
+      else if (to_encode[i] == ';')
+    	  encoded += "\\:";
       else
-      {
-           char* orig_char = (char*) calloc(2, sizeof(char));
-           orig_char[0] = to_encode[i];
-           orig_char[1] = '\0';
- 
-           strcat(encoded, orig_char);
- 
-           free(orig_char);
-           orig_char = NULL;
-      }
+          encoded += to_encode[i];
   }
 
   return encoded;
 }
 
-// Build up the applet tag string that we'll send to the applet
-// viewer.
-static gchar*
-plugin_create_applet_tag (int16_t argc, char* argn[], char* argv[])
+/*
+ * Build a string containing an encoded list of parameters to send to the applet viewer.
+ * The parameters are separated as 'key1;value1;key2;value2;'. As well, they are
+ * separated and escaped as:
+ * "\n" for new line, "\\" for "\", "\:" for ";"
+ */
+std::string
+plugin_parameters_string (int argc, char* argn[], char* argv[])
 {
-  PLUGIN_DEBUG ("plugin_create_applet_tag\n");
+  PLUGIN_DEBUG ("plugin_parameters_string\n");
 
-  gchar* applet_tag = g_strdup ("<EMBED ");
-  gchar* parameters = g_strdup ("");
+  std::string parameters;
 
-  for (int16_t i = 0; i < argc; i++)
+  for (int i = 0; i < argc; i++)
+  {
+    if (argv[i] != NULL)
     {
-      gchar* argn_escaped = encode_string(argn[i]);
-      gchar* argv_escaped = encode_string(argv[i]);
+        std::string name_escaped = escape_parameter_string(argn[i]);
+        std::string value_escaped = escape_parameter_string(argv[i]);
 
-      if (!g_ascii_strcasecmp (argn_escaped, "code"))
-        {
-          gchar* code = g_strdup_printf ("CODE=\"%s\" ", argv_escaped);
-          applet_tag = g_strconcat (applet_tag, code, NULL);
-          g_free (code);
-          code = NULL;
+        //Encode parameters and send as 'key1;value1;key2;value2;' etc
+        parameters += name_escaped;
+        parameters += ';';
+        parameters += value_escaped;
+        parameters += ';';
     }
-      else if (!g_ascii_strcasecmp (argn_escaped, "java_code"))
-    {
-          gchar* java_code = g_strdup_printf ("JAVA_CODE=\"%s\" ", argv_escaped);
-          applet_tag = g_strconcat (applet_tag, java_code, NULL);
-          g_free (java_code);
-          java_code = NULL;
-    }
-      else if (!g_ascii_strcasecmp (argn_escaped, "codebase"))
-    {
-          gchar* codebase = g_strdup_printf ("CODEBASE=\"%s\" ", argv_escaped);
-          applet_tag = g_strconcat (applet_tag, codebase, NULL);
-          g_free (codebase);
-          codebase = NULL;
-    }
-      else if (!g_ascii_strcasecmp (argn_escaped, "java_codebase"))
-    {
-          gchar* java_codebase = g_strdup_printf ("JAVA_CODEBASE=\"%s\" ", argv_escaped);
-          applet_tag = g_strconcat (applet_tag, java_codebase, NULL);
-          g_free (java_codebase);
-          java_codebase = NULL;
-    }
-      else if (!g_ascii_strcasecmp (argn_escaped, "classid"))
-    {
-          gchar* classid = g_strdup_printf ("CLASSID=\"%s\" ", argv_escaped);
-          applet_tag = g_strconcat (applet_tag, classid, NULL);
-          g_free (classid);
-          classid = NULL;
-    }
-      else if (!g_ascii_strcasecmp (argn_escaped, "archive"))
-    {
-          gchar* archive = g_strdup_printf ("ARCHIVE=\"%s\" ", argv_escaped);
-          applet_tag = g_strconcat (applet_tag, archive, NULL);
-          g_free (archive);
-          archive = NULL;
-    }
-      else if (!g_ascii_strcasecmp (argn_escaped, "java_archive"))
-    {
-          gchar* java_archive = g_strdup_printf ("JAVA_ARCHIVE=\"%s\" ", argv_escaped);
-          applet_tag = g_strconcat (applet_tag, java_archive, NULL);
-          g_free (java_archive);
-          java_archive = NULL;
-    }
-      else if (!g_ascii_strcasecmp (argn_escaped, "width"))
-    {
-          gchar* width = g_strdup_printf ("width=\"%s\" ", argv_escaped);
-          applet_tag = g_strconcat (applet_tag, width, NULL);
-          g_free (width);
-          width = NULL;
-    }
-      else if (!g_ascii_strcasecmp (argn_escaped, "height"))
-    {
-          gchar* height = g_strdup_printf ("height=\"%s\" ", argv_escaped);
-          applet_tag = g_strconcat (applet_tag, height, NULL);
-          g_free (height);
-          height = NULL;
-    }
-      else
-        {
+  }
 
-          if (argv_escaped != '\0')
-            {
-              parameters = g_strconcat (parameters, "<PARAM NAME=\"", argn_escaped,
-                                        "\" VALUE=\"", argv_escaped, "\">", NULL);
-            }
-        }
+  PLUGIN_DEBUG ("plugin_parameters_string return\n");
 
-      free(argn_escaped);
-      free(argv_escaped);
-
-      argn_escaped = NULL;
-      argv_escaped = NULL;
-    }
-
-  applet_tag = g_strconcat (applet_tag, ">", parameters, "</EMBED>", NULL);
-
-  g_free (parameters);
-  parameters = NULL;
-
-  PLUGIN_DEBUG ("plugin_create_applet_tag return\n");
-
-  return applet_tag;
+  return parameters;
 }
 
 // plugin_send_message_to_appletviewer must be called while holding
@@ -2017,8 +1753,8 @@ plugin_data_destroy (NPP instance)
   tofree->instance_id = NULL;
 
   // cleanup applet tag
-  g_free (tofree->applet_tag);
-  tofree->applet_tag = NULL;
+  g_free (tofree->parameters_string);
+  tofree->parameters_string = NULL;
 
   g_free(tofree->source);
   tofree->source = NULL;
@@ -2035,11 +1771,7 @@ plugin_data_destroy (NPP instance)
 static bool
 initialize_browser_functions(const NPNetscapeFuncs* browserTable)
 {
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-#define NPNETSCAPEFUNCS_LAST_FIELD_USED (browserTable->pluginthreadasynccall)
-#else
 #define NPNETSCAPEFUNCS_LAST_FIELD_USED (browserTable->setvalueforurl)
-#endif
 
   //Determine the size in bytes, as a difference of the address past the last used field
   //And the browser table address
@@ -2081,20 +1813,6 @@ initialize_plugin_table(NPPluginFuncs* pluginTable)
 
   pluginTable->version = (NP_VERSION_MAJOR << 8) + NP_VERSION_MINOR;
   pluginTable->size = sizeof (NPPluginFuncs);
-
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-  pluginTable->newp = NewNPP_NewProc (ITNP_New);
-  pluginTable->destroy = NewNPP_DestroyProc (ITNP_Destroy);
-  pluginTable->setwindow = NewNPP_SetWindowProc (ITNP_SetWindow);
-  pluginTable->newstream = NewNPP_NewStreamProc (ITNP_NewStream);
-  pluginTable->destroystream = NewNPP_DestroyStreamProc (ITNP_DestroyStream);
-  pluginTable->asfile = NewNPP_StreamAsFileProc (ITNP_StreamAsFile);
-  pluginTable->writeready = NewNPP_WriteReadyProc (ITNP_WriteReady);
-  pluginTable->write = NewNPP_WriteProc (ITNP_Write);
-  pluginTable->print = NewNPP_PrintProc (ITNP_Print);
-  pluginTable->urlnotify = NewNPP_URLNotifyProc (ITNP_URLNotify);
-  pluginTable->getvalue = NewNPP_GetValueProc (ITNP_GetValue);
-#else
   pluginTable->newp = NPP_NewProcPtr (ITNP_New);
   pluginTable->destroy = NPP_DestroyProcPtr (ITNP_Destroy);
   pluginTable->setwindow = NPP_SetWindowProcPtr (ITNP_SetWindow);
@@ -2106,7 +1824,6 @@ initialize_plugin_table(NPPluginFuncs* pluginTable)
   pluginTable->print = NPP_PrintProcPtr (ITNP_Print);
   pluginTable->urlnotify = NPP_URLNotifyProcPtr (ITNP_URLNotify);
   pluginTable->getvalue = NPP_GetValueProcPtr (ITNP_GetValue);
-#endif
 
   return true;
 }
@@ -2122,6 +1839,7 @@ initialize_plugin_table(NPPluginFuncs* pluginTable)
 // this function, then it is evident that NP_Initialize has already
 // been called. There is no need to call this function more than once and
 // this workaround avoids any duplicate calls.
+__attribute__ ((visibility ("default")))
 NPError
 NP_Initialize (NPNetscapeFuncs* browserTable, NPPluginFuncs* pluginTable)
 {
@@ -2176,91 +1894,67 @@ NP_Initialize (NPNetscapeFuncs* browserTable, NPPluginFuncs* pluginTable)
   if (initialized)
     return NPERR_NO_ERROR;
 
+  NPError np_error = NPERR_NO_ERROR;
+
   // Make sure the plugin data directory exists, creating it if
   // necessary.
-  data_directory = g_strconcat (P_tmpdir, NULL);
-  if (!data_directory)
-    {
-      PLUGIN_ERROR ("Failed to create data directory name.");
-      return NPERR_OUT_OF_MEMORY_ERROR;
-    }
-  NPError np_error = NPERR_NO_ERROR;
-  gchar* filename = NULL;
 
-  // If P_tmpdir does not exist, try /tmp directly
-
-  if (!g_file_test (data_directory,
+  const char* tmpdir_env = getenv("TMPDIR");
+  if (tmpdir_env != NULL && g_file_test (tmpdir_env,
                     (GFileTest) (G_FILE_TEST_EXISTS | G_FILE_TEST_IS_DIR)))
     {
-      int file_error = 0;
-
-      data_directory = g_strconcat ("/tmp", NULL);
-        if (!data_directory)
-          {
-            PLUGIN_ERROR ("Failed to create data directory name.");
-            return NPERR_OUT_OF_MEMORY_ERROR;
-          }
-
+      data_directory = tmpdir_env;
+    }
+  else if (g_file_test (P_tmpdir,
+                    (GFileTest) (G_FILE_TEST_EXISTS | G_FILE_TEST_IS_DIR)))
+    {
+      data_directory = P_tmpdir;
+    }
+  else
+    {
+      // If TMPDIR and P_tmpdir do not exist, try /tmp directly
+      data_directory = "/tmp";
     }
 
-  data_directory = g_strconcat (data_directory, "/icedteaplugin-", getenv("USER"), NULL);
-
-  if (!data_directory)
-  {
-      PLUGIN_ERROR ("Failed to create data directory name.");
-      return NPERR_OUT_OF_MEMORY_ERROR;
-  }
+  data_directory += "/icedteaplugin-";
+  if (getenv("USER") != NULL)
+      data_directory += getenv("USER");
 
   // Now create a icedteaplugin subdir
-  if (!g_file_test (data_directory,
+  if (!g_file_test (data_directory.c_str(),
                     (GFileTest) (G_FILE_TEST_EXISTS | G_FILE_TEST_IS_DIR)))
     {
       int file_error = 0;
 
-      file_error = g_mkdir (data_directory, 0700);
+      file_error = g_mkdir (data_directory.c_str(), 0700);
       if (file_error != 0)
         {
           PLUGIN_ERROR_THREE ("Failed to create data directory",
-                          data_directory,
+                          data_directory.c_str(),
                           strerror (errno));
-          np_error = NPERR_GENERIC_ERROR;
-          goto cleanup_data_directory;
+          return NPERR_GENERIC_ERROR;
         }
     }
 
 
-  // If data directory doesn't exit by this point, bail
-  if (!g_file_test (data_directory,
+  // If data directory doesn't exist by this point, bail
+  if (!g_file_test (data_directory.c_str(),
                     (GFileTest) (G_FILE_TEST_EXISTS | G_FILE_TEST_IS_DIR)))
     {
       PLUGIN_ERROR_THREE ("Temp directory does not exist: ",
-                          data_directory,
+                          data_directory.c_str(),
                           strerror (errno));
-
-      np_error = NPERR_GENERIC_ERROR;
-            goto cleanup_data_directory;
-
+      return NPERR_GENERIC_ERROR;
     }
 
   // Set appletviewer_executable.
-  filename = g_strdup(ICEDTEA_WEB_JRE);
-  appletviewer_executable = g_strdup_printf ("%s/bin/java",
-                                             filename);
-  PLUGIN_DEBUG("Executing java at %s\n", appletviewer_executable);
-  if (!appletviewer_executable)
-    {
-      PLUGIN_ERROR ("Failed to create appletviewer executable name.");
-      np_error = NPERR_OUT_OF_MEMORY_ERROR;
-      goto cleanup_filename;
-    }
-
+  PLUGIN_DEBUG("Executing java at %s\n", get_plugin_executable().c_str());
   np_error = plugin_test_appletviewer ();
   if (np_error != NPERR_NO_ERROR)
     {
-      plugin_display_failure_dialog ();
-      goto cleanup_appletviewer_executable;
+      fprintf(stderr, "Unable to find java executable %s\n", get_plugin_executable().c_str());
+      return np_error;
     }
-  g_free (filename);
 
   initialized = true;
 
@@ -2270,7 +1964,7 @@ NP_Initialize (NPNetscapeFuncs* browserTable, NPPluginFuncs* pluginTable)
 
   plugin_instance_mutex = g_mutex_new ();
 
-  PLUGIN_DEBUG ("NP_Initialize: using %s\n", appletviewer_executable);
+  PLUGIN_DEBUG ("NP_Initialize: using %s\n", get_plugin_executable().c_str());
 
   plugin_req_proc = new PluginRequestProcessor();
   java_req_proc = new JavaMessageSender();
@@ -2296,34 +1990,11 @@ NP_Initialize (NPNetscapeFuncs* browserTable, NPPluginFuncs* pluginTable)
   PLUGIN_DEBUG ("NP_Initialize return\n");
 
   return NPERR_NO_ERROR;
-
- cleanup_appletviewer_executable:
-  if (appletviewer_executable)
-    {
-      g_free (appletviewer_executable);
-      appletviewer_executable = NULL;
-    }
-
- cleanup_filename:
-  if (filename)
-    {
-      g_free (filename);
-      filename = NULL;
-    }
-
- cleanup_data_directory:
-  if (data_directory)
-    {
-      g_free (data_directory);
-      data_directory = NULL;
-    }
-
-
-  return np_error;
 }
 
 // Returns a string describing the MIME type that this plugin
 // handles.
+__attribute__ ((visibility ("default")))
 #ifdef LEGACY_XULRUNNERAPI
   char* 
 #else
@@ -2340,6 +2011,7 @@ NP_GetMIMEDescription ()
 
 // Returns a value relevant to the plugin as a whole.  The browser
 // calls this function to obtain information about the plugin.
+__attribute__ ((visibility ("default")))
 NPError
 NP_GetValue (void* future, NPPVariable variable, void* value)
 {
@@ -2373,6 +2045,7 @@ NP_GetValue (void* future, NPPVariable variable, void* value)
 
 // Shuts down the plugin.  Called after the last plugin instance is
 // destroyed.
+__attribute__ ((visibility ("default")))
 NPError
 NP_Shutdown (void)
 {
@@ -2383,18 +2056,6 @@ NP_Shutdown (void)
     {
       g_mutex_free (plugin_instance_mutex);
       plugin_instance_mutex = NULL;
-    }
-
-  if (data_directory)
-    {
-      g_free (data_directory);
-      data_directory = NULL;
-    }
-
-  if (appletviewer_executable)
-    {
-      g_free (appletviewer_executable);
-      appletviewer_executable = NULL;
     }
 
   // stop the appletviewer
@@ -2493,7 +2154,7 @@ get_scriptable_object(NPP instance)
         // a 0 handle
         if (!data->window_handle)
         {
-            plugin_send_initialization_message(data->instance_id, 0, 0, 0, data->applet_tag);
+            plugin_send_initialization_message(data->instance_id, 0, 0, 0, data->parameters_string);
         }
 
         java_result = java_request.getAppletObjectInstance(id_str);

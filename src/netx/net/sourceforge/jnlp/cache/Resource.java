@@ -109,6 +109,8 @@ public class Resource {
         synchronized (resources) {
             Resource resource = new Resource(location, requestVersion, updatePolicy);
 
+            //FIXME - url ignores port during its comparison
+            //this may affect test-suites
             int index = resources.indexOf(resource);
             if (index >= 0) { // return existing object
                 Resource result = resources.get(index);
@@ -272,8 +274,7 @@ public class Resource {
             send = trackers.hardList();
         }
 
-        for (int i = 0; i < send.size(); i++) {
-            ResourceTracker rt = send.get(i);
+        for (ResourceTracker rt : send) {
             rt.fireDownloadEvent(this);
         }
     }

@@ -51,6 +51,7 @@ public final class DeploymentConfiguration {
     public static final String DEPLOYMENT_DIR = ".icedtea";
     public static final String DEPLOYMENT_CONFIG = "deployment.config";
     public static final String DEPLOYMENT_PROPERTIES = "deployment.properties";
+    public static final String APPLET_TRUST_SETTINGS = ".appletTrustSettings";
 
     public static final String DEPLOYMENT_COMMENT = "Netx deployment configuration";
 
@@ -105,6 +106,9 @@ public final class DeploymentConfiguration {
     /** Boolean. Only show security prompts to user if true */
     public static final String KEY_SECURITY_PROMPT_USER = "deployment.security.askgrantdialog.show";
 
+    //enum of AppletSecurityLevel in result
+    public static final String KEY_SECURITY_LEVEL = "deployment.security.level";
+
     public static final String KEY_SECURITY_TRUSTED_POLICY = "deployment.security.trusted.policy";
 
     /** Boolean. Only give AWTPermission("showWindowWithoutWarningBanner") if true */
@@ -158,6 +162,12 @@ public final class DeploymentConfiguration {
     public static final String KEY_BROWSER_PATH = "deployment.browser.path";
     public static final String KEY_UPDATE_TIMEOUT = "deployment.javaws.update.timeout";
 
+    /*
+     * JVM arguments for plugin
+     */
+    public static final String KEY_PLUGIN_JVM_ARGUMENTS= "deployment.plugin.jvm.arguments";
+    public static final String KEY_JRE_DIR= "deployment.jre.dir";
+
     public enum ConfigType {
         System, User
     }
@@ -169,6 +179,10 @@ public final class DeploymentConfiguration {
     private File systemPropertiesFile = null;
     /** The user's deployment.config file */
     private File userPropertiesFile = null;
+    
+    /*default user file*/
+    public static final  File USER_DEPLOYMENT_PROPERTIES_FILE = new File(System.getProperty("user.home") + File.separator + DEPLOYMENT_DIR
+                + File.separator + DEPLOYMENT_PROPERTIES);
 
     /** the current deployment properties */
     private Map<String, Setting<String>> currentConfiguration;
@@ -191,6 +205,17 @@ public final class DeploymentConfiguration {
         load(true);
     }
 
+    public static File getAppletTrustUserSettingsPath() {
+        return new File(System.getProperty("user.home") + File.separator + DEPLOYMENT_DIR
+                + File.separator + APPLET_TRUST_SETTINGS);
+    }
+
+     public static File getAppletTrustGlobalSettingsPath() {
+       return new File(File.separator + "etc" + File.separator + ".java" + File.separator
+                + "deployment" + File.separator + APPLET_TRUST_SETTINGS);
+        
+    }
+
     /**
      * Initialize this deployment configuration by reading configuration files.
      * Generally, it will try to continue and ignore errors it finds (such as file not found).
@@ -201,14 +226,19 @@ public final class DeploymentConfiguration {
      */
     public void load(boolean fixIssues) throws ConfigurationException {
         // make sure no state leaks if security check fails later on
-        File userFile = new File(System.getProperty("user.home") + File.separator + DEPLOYMENT_DIR
-                + File.separator + DEPLOYMENT_PROPERTIES);
+        File userFile = new File(USER_DEPLOYMENT_PROPERTIES_FILE.getAbsolutePath());
 
         SecurityManager sm = System.getSecurityManager();
         if (sm != null) {
             sm.checkRead(userFile.toString());
         }
 
+        File systemConfigFile = findSystemConfigFile();
+
+        load(systemConfigFile, userFile, fixIssues);
+    }
+
+    void load(File systemConfigFile, File userFile, boolean fixIssues) throws ConfigurationException {
         Map<String, Setting<String>> initialProperties = Defaults.getDefaults();
 
         Map<String, Setting<String>> systemProperties = null;
@@ -218,7 +248,6 @@ public final class DeploymentConfiguration {
          * there is a system-level deployment.poperties file
          */
 
-        File systemConfigFile = findSystemConfigFile();
         if (systemConfigFile != null) {
             if (loadSystemConfiguration(systemConfigFile)) {
                 if (JNLPRuntime.isDebug()) {
@@ -254,6 +283,21 @@ public final class DeploymentConfiguration {
         }
 
         currentConfiguration = initialProperties;
+    }
+
+    /**
+     * Copies the current configuration into the target
+     */
+    public void copyTo(Properties target) {
+        Set<String> names = getAllPropertyNames();
+
+        for (String name : names) {
+            String value = getProperty(name);
+            // for Properties, missing and null are identical
+            if (value != null) {
+                target.setProperty(name, value);
+            }
+        }
     }
 
     /**
@@ -375,8 +419,27 @@ public final class DeploymentConfiguration {
             return etcFile;
         }
 
-        File jreFile = new File(System.getProperty("java.home") + File.separator + "lib"
-                + File.separator + DEPLOYMENT_CONFIG);
+        String jrePath = null;
+        try {
+            Map<String, Setting<String>> tmpProperties = parsePropertiesFile(USER_DEPLOYMENT_PROPERTIES_FILE);
+            Setting<String> jreSetting = tmpProperties.get(KEY_JRE_DIR);
+            if (jreSetting != null) {
+                jrePath = jreSetting.getValue();
+            }
+        } catch (Exception ex) {
+            if (JNLPRuntime.isDebug()){
+                ex.printStackTrace();
+            }
+        }
+
+        File jreFile;
+        if (jrePath != null) {
+            jreFile = new File(jrePath + File.separator + "lib"
+                    + File.separator + DEPLOYMENT_CONFIG);
+        } else {
+            jreFile = new File(System.getProperty("java.home") + File.separator + "lib"
+                    + File.separator + DEPLOYMENT_CONFIG);
+        }
         if (jreFile.isFile()) {
             return jreFile;
         }
@@ -469,6 +532,9 @@ public final class DeploymentConfiguration {
         try {
             return parsePropertiesFile(file);
         } catch (IOException e) {
+            if (JNLPRuntime.isDebug()){
+                e.printStackTrace();
+            }
             return null;
         }
     }

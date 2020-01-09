@@ -1,4 +1,4 @@
-AC_INIT([icedtea-web],[1.2.3],[distro-pkg-dev@openjdk.java.net], [icedtea-web], [http://icedtea.classpath.org/wiki/IcedTea-Web])
+AC_INIT([icedtea-web],[1.4.1],[distro-pkg-dev@openjdk.java.net], [icedtea-web], [http://icedtea.classpath.org/wiki/IcedTea-Web])
 AM_INIT_AUTOMAKE([1.9 tar-pax foreign])
 AC_CONFIG_FILES([Makefile netx.manifest])
 
@@ -77,6 +77,7 @@ IT_CHECK_FOR_CLASS(SUN_NET_WWW_PROTOCOL_JAR_URLJARFILE, [sun.net.www.protocol.ja
 IT_CHECK_FOR_CLASS(SUN_NET_WWW_PROTOCOL_JAR_URLJARFILECALLBACK, [sun.net.www.protocol.jar.URLJarFileCallBack])
 IT_CHECK_FOR_CLASS(SUN_AWT_X11_XEMBEDDEDFRAME, [sun.awt.X11.XEmbeddedFrame])
 IT_CHECK_FOR_CLASS(SUN_MISC_REF, [sun.misc.Ref])
+IT_CHECK_FOR_CLASS(SUN_MISC_BASE64DECODER, [sun.misc.BASE64Decoder])
 IT_CHECK_FOR_CLASS(COM_SUN_JNDI_TOOLKIT_URL_URLUTIL, [com.sun.jndi.toolkit.url.UrlUtil])
 IT_CHECK_FOR_CLASS(SUN_APPLET_APPLETIMAGEREF, [sun.applet.AppletImageRef])
 IT_CHECK_FOR_APPLETVIEWERPANEL_HOLE
@@ -88,6 +89,16 @@ IT_CHECK_XULRUNNER_API_VERSION
 #
 
 AC_CHECK_PROGS([XSLTPROC],[xsltproc],[], [])
+# browser to be linked/tested
+# Example: IT_FIND_BROWSER([browser-name],[variable-to-store-path],[default-run-command-if-different-from-the-browser-name])
+IT_FIND_BROWSER([firefox],[FIREFOX])
+IT_FIND_BROWSER([chrome],[CHROME],[google-chrome])
+IT_FIND_BROWSER([chromium],[CHROMIUM],[chromium-browser])
+IT_FIND_BROWSER([opera],[OPERA])
+IT_FIND_BROWSER([midori],[MIDORI])
+IT_FIND_BROWSER([epiphany],[EPIPHANY])
+IT_SET_GLOBAL_BROWSERTESTS_BEHAVIOUR
+
 AM_CONDITIONAL([WITH_XSLTPROC], [test x"$XSLTPROC" != x ])
 IT_FIND_OPTIONAL_JAR([rhino], RHINO,
     [/usr/share/java/js.jar /usr/share/rhino-1.6/lib/js.jar])
@@ -95,6 +106,10 @@ IT_FIND_OPTIONAL_JAR([junit], JUNIT,
     [/usr/share/java/junit4.jar /usr/share/junit-4/lib/junit.jar])
 IT_FIND_OPTIONAL_JAR([emma], EMMA,
     [/usr/share/java/emma.jar])
+IT_FIND_OPTIONAL_JAR([jacoco], JACOCO,
+    [/usr/share/java/jacoco/org.jacoco.core.jar])
+IT_FIND_OPTIONAL_JAR([asm], ASM,
+    [/usr/share/java/objectweb-asm4/asm-all.jar /usr/share/java/objectweb-asm4/asm-all-4.0.jar /usr/share/java/objectweb-asm/asm-all.jar])
 
 AC_CONFIG_FILES([jrunscript], [chmod u+x jrunscript])
 AC_CONFIG_FILES([build.properties])

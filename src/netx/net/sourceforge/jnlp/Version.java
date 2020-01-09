@@ -230,6 +230,7 @@ public class Version {
         Integer number2 = Integer.valueOf(0);
 
         // compare as integers
+        // for normalization key, compare exact object, not using .equals
         try {
             if (!(part1 == emptyString)) // compare to magic normalization key
                 number1 = Integer.valueOf(part1);
@@ -242,9 +243,9 @@ public class Version {
             // means to compare as strings
         }
 
-        if (part1 == emptyString)
+        if (part1 == emptyString) // compare to magic normalization key
             part1 = "";
-        if (part2 == emptyString)
+        if (part2 == emptyString) // compare to magic normalization key
             part2 = "";
 
         return part1.compareTo(part2);
@@ -307,42 +308,6 @@ public class Version {
 
     public String toString() {
         return versionString;
-    }
-
-    /**
-     * Test.
-     */
-    /*
-    public static void main(String args[]) {
-        Version jvms[] = {
-            new Version("1.1* 1.3*"),
-            new Version("1.2+"),
-        };
-
-        Version versions[] = {
-            new Version("1.1"),
-            new Version("1.1.8"),
-            new Version("1.2"),
-            new Version("1.3"),
-            new Version("2.0"),
-            new Version("1.3.1"),
-            new Version("1.2.1"),
-            new Version("1.3.1-beta"),
-            new Version("1.1 1.2"),
-            new Version("1.2 1.3"),
-        };
-
-        for (int j = 0; j < jvms.length; j++) {
-            for (int v = 0; v < versions.length; v++) {
-                System.out.print( jvms[j].toString() + " " );
-                if (!jvms[j].matches(versions[v]))
-                    System.out.print( "!" );
-                System.out.println( "matches " + versions[v].toString() );
-            }
-        }
-
-        System.out.println("Test completed");
-    }
-    */
+    }  
 
 }

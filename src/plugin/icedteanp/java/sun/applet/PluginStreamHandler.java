@@ -1,4 +1,4 @@
-/* VoidPluginCallRequest -- represent Java-to-JavaScript requests
+/*
    Copyright (C) 2008  Red Hat
 
 This file is part of IcedTea.
@@ -62,8 +62,7 @@ public class PluginStreamHandler {
     private volatile boolean shuttingDown = false;
 
 
-    public PluginStreamHandler(InputStream inputstream, OutputStream outputstream)
-            throws MalformedURLException, IOException {
+    public PluginStreamHandler(InputStream inputstream, OutputStream outputstream) {
 
         PluginDebug.debug("Current context CL=", Thread.currentThread().getContextClassLoader());
 
@@ -81,7 +80,7 @@ public class PluginStreamHandler {
 
     public void startProcessing() {
 
-        Thread listenerThread = new Thread() {
+        Thread listenerThread = new Thread("PluginStreamHandlerListenerThread") {
 
             public void run() {
 

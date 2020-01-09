@@ -326,19 +326,19 @@ function weekdayRange() {
  */
 function dateRange() {
     switch (arguments.length) {
-       case 1: return isDateInRange(new Date(),arguments[0]);
-       case 2: return isDateInRange(new Date(),arguments[0],arguments[1]);
-       case 3: return isDateInRange(new Date(),arguments[0],arguments[1],arguments[2]);
-       case 4: return isDateInRange(new Date(),arguments[0],arguments[1],arguments[2],arguments[3]);
-       case 5: return isDateInRange(new Date(),arguments[0],arguments[1],arguments[2],arguments[3],arguments[4]);
-       case 6: return isDateInRange(new Date(),arguments[0],arguments[1],arguments[2],arguments[3],arguments[4],arguments[5]);
-       case 7: return isDateInRange(new Date(),arguments[0],arguments[1],arguments[2],arguments[3],arguments[4],arguments[5],arguments[6]); //GMT
+       case 1: return isDateInRange_internallForIcedTeaWebTesting(new Date(),arguments[0]);
+       case 2: return isDateInRange_internallForIcedTeaWebTesting(new Date(),arguments[0],arguments[1]);
+       case 3: return isDateInRange_internallForIcedTeaWebTesting(new Date(),arguments[0],arguments[1],arguments[2]);
+       case 4: return isDateInRange_internallForIcedTeaWebTesting(new Date(),arguments[0],arguments[1],arguments[2],arguments[3]);
+       case 5: return isDateInRange_internallForIcedTeaWebTesting(new Date(),arguments[0],arguments[1],arguments[2],arguments[3],arguments[4]);
+       case 6: return isDateInRange_internallForIcedTeaWebTesting(new Date(),arguments[0],arguments[1],arguments[2],arguments[3],arguments[4],arguments[5]);
+       case 7: return isDateInRange_internallForIcedTeaWebTesting(new Date(),arguments[0],arguments[1],arguments[2],arguments[3],arguments[4],arguments[5],arguments[6]); //GMT
        default:
            return false;
     }
 }
 
-    function isDateInRange() {
+function isDateInRange_internallForIcedTeaWebTesting() {
 
     function isDate(date) {
         if (typeof(date) === 'number' && (date <= 31 && date >= 1)) {
@@ -415,7 +415,7 @@ function dateRange() {
     }
 
     function inYearRange(today, year1, year2) {
-        if (year1 <= today.getYear() && today.getYear() <= year2) {
+        if (year1 <= today.getFullYear() && today.getFullYear() <= year2) {
             return true;
         } else {
             return false;
@@ -482,7 +482,7 @@ function dateRange() {
 
     function inYearMonthRange(today, month1, year1, month2, year2) {
         if (year1 === year2) {
-            if (today.getYear() === year1) {
+            if (today.getFullYear() === year1) {
                if (month1 <= today.getMonth() && today.getMonth() <= month2) {
                    return true;
                } else {
@@ -493,14 +493,14 @@ function dateRange() {
             }
         }
         if (year1 < year2) {
-            if (year1 <= today.getYear() && today.getYear() <= year2) {
-                if (today.getYear() === year1) {
+            if (year1 <= today.getFullYear() && today.getFullYear() <= year2) {
+                if (today.getFullYear() === year1) {
                     if (today.getMonth() >= month1) {
                         return true;
                     } else {
                         return false;
                     }
-                } else if (today.getYear() === year2) {
+                } else if (today.getFullYear() === year2) {
                     if (today.getMonth() <= month2) {
                         return true;
                     } else {
@@ -515,12 +515,11 @@ function dateRange() {
         } else {
             return false;
         }
-
     }
 
     function inYearMonthDateRange(today, date1, month1, year1, date2, month2, year2) {
         if (year1 === year2) {
-            if (year1 === today.getYear()) {
+            if (year1 === today.getFullYear()) {
                 if ((month1 <= today.getMonth()) && (today.getMonth() <= month2)) {
                     if (month1 === month2) {
                         if (date1 <= today.getDate() && today.getDate() <= date2) {
@@ -550,8 +549,8 @@ function dateRange() {
                 return false;
             }
         } else if (year1 < year2) {
-            if (year1 <= today.getYear() && today.getYear() <= year2) {
-                if (today.getYear() === year1) {
+            if (year1 <= today.getFullYear() && today.getFullYear() <= year2) {
+                if (today.getFullYear() === year1) {
                     if (today.getMonth() === month1) {
                         if (today.getDate() >= date1) {
                             return true;
@@ -563,11 +562,17 @@ function dateRange() {
                     } else {
                         return false;
                     }
-                } else if (today.getYear() === year2) {
-                    if (today.getMonth() <= month2) {
-
-                    } else {
+                } else if (today.getFullYear() === year2) {
+                    if (today.getMonth() === month2) {
+                        if (today.getDate() <= date1) {
+                            return true;
+                        } else {
+                            return false;
+                        }
+                    } else if (today.getMonth() < month2) {
                         return true;
+                    } else {
+                        return false;
                     }
                 } else {
                     return true;
@@ -617,7 +622,7 @@ function dateRange() {
                     return false;
                 }
             } else { // year
-                if (today.getYear() === arg) {
+                if (today.getFullYear() === arg) {
                     return true;
                 } else {
                     return false;

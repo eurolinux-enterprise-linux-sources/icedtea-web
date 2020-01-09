@@ -100,6 +100,16 @@ public final class JSObject {
     }
 
     /**
+     * Package-private method used through JSUtil#getJSObjectInternalReference.
+     * We make this package-private to avoid polluting the public interface.
+     * @return the internal identifier
+     */
+    long getInternalReference() {
+        AccessController.getContext().checkPermission(new JSObjectUnboxPermission());
+        return internal;
+    }
+
+    /**
      * it is illegal to construct a JSObject manually
      */
     public JSObject(int jsobj_addr) {
@@ -130,9 +140,9 @@ public final class JSObject {
             StackTraceElement[] stack = Thread.currentThread().getStackTrace();
             boolean mayProceed = false;
 
-            for (int i = 0; i < stack.length; i++) {
-                if (stack[i].getClassName().equals("netscape.javascript.JSObject") &&
-                        stack[i].getMethodName().equals("getWindow")) {
+            for (StackTraceElement element : stack) {
+                if (element.getClassName().equals("netscape.javascript.JSObject") &&
+                        element.getMethodName().equals("getWindow")) {
                     mayProceed = true;
                 }
             }
@@ -209,8 +219,9 @@ public final class JSObject {
             args = new Object[0];
 
         PluginDebug.debug("JSObject.call ", methodName);
-        for (int i = 0; i < args.length; i++)
-            PluginDebug.debug(" ", args[i]);
+        for (Object arg : args) {
+            PluginDebug.debug(" ", arg);
+        }
         PluginDebug.debug("");
         return PluginAppletViewer.call(internal, methodName, args);
     }

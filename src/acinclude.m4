@@ -365,12 +365,9 @@ dnl Check for plugin support headers and libraries.
 dnl FIXME: use unstable
 AC_REQUIRE([IT_CHECK_PLUGIN])
 if test "x${enable_plugin}" = "xyes" ; then
-  PKG_CHECK_MODULES(GTK, gtk+-2.0)
   PKG_CHECK_MODULES(GLIB, glib-2.0)
   AC_SUBST(GLIB_CFLAGS)
   AC_SUBST(GLIB_LIBS)
-  AC_SUBST(GTK_CFLAGS)
-  AC_SUBST(GTK_LIBS)
 
   PKG_CHECK_MODULES(MOZILLA, npapi-sdk, [
     AC_CACHE_CHECK([for xulrunner version], [xulrunner_cv_collapsed_version],[
@@ -882,4 +879,70 @@ AC_DEFUN_ONCE([IT_SET_VERSION],
   FULL_VERSION="${PACKAGE_VERSION}${ICEDTEA_REV}${ICEDTEA_PKG}"
   AC_MSG_RESULT([${FULL_VERSION}])
   AC_SUBST([FULL_VERSION])
+])
+
+dnl Allows you to configure (enable/disable/set path to) the browser
+dnl REQUIRED Parameters: 
+dnl [browser name, variable to store path, default command to run browser (if not provided, assume it's the same as the browser name]
+AC_DEFUN([IT_FIND_BROWSER],
+[
+  AC_ARG_WITH([$1],
+              [AS_HELP_STRING(--with-$1,specify the location of $1)],
+  [
+   if test "${withval}" = "no" || test "${withval}" = "yes" || test "${withval}" = "" ; then
+    $2=""
+   elif test -f "${withval}" ; then
+    $2="${withval}"
+   else 
+    AC_MSG_CHECKING([for $1])
+    AC_MSG_RESULT([not found])
+    AC_MSG_FAILURE([invalid location specified to $1: ${withval}])
+   fi
+  ],
+  [
+   withval="yes"
+  ])
+
+  if test -f "${$2}"; then
+   AC_MSG_CHECKING([for $1])
+   AC_MSG_RESULT([${$2}])
+  elif test "${withval}" != "no"; then
+   if test $# -gt 2; then
+    AC_PATH_TOOL([$2], [$3], [], [])  
+   else
+    AC_PATH_TOOL([$2], [$1], [], [])
+   fi
+  else
+   AC_MSG_CHECKING([for $1])        
+   AC_MSG_RESULT([no])
+  fi
+])
+
+AC_DEFUN_ONCE([IT_SET_GLOBAL_BROWSERTESTS_BEHAVIOUR],
+[
+  AC_MSG_CHECKING([how browser test will be run])
+  AC_ARG_WITH([browser-tests],
+             [AS_HELP_STRING([--with-browser-tests],
+                              [yes - as defined (default), no - all browser tests will be skipped, one - all "mutiple browsers" test will behave as "one" test, all - all browser tests will be run for all set browsers])],
+             [
+               BROWSER_SWITCH=${withval}
+             ],
+             [
+               BROWSER_SWITCH="yes"
+             ])
+  D_PARAM_PART="-Dmodified.browsers.run"
+  case "$BROWSER_SWITCH" in
+    "yes" )
+        BROWSER_TESTS_MODIFICATION="" ;;
+    "no" )
+        BROWSER_TESTS_MODIFICATION="$D_PARAM_PART=ignore" ;;
+    "one" )
+        BROWSER_TESTS_MODIFICATION="$D_PARAM_PART=one" ;;
+    "all" )
+        BROWSER_TESTS_MODIFICATION="$D_PARAM_PART=all" ;;
+    *) 
+        AC_MSG_ERROR([unknown valkue of with-browser-tests ($BROWSER_SWITCH), so not use (yes) or set yes|no|one|all])
+  esac
+  AC_MSG_RESULT(${BROWSER_SWITCH})
+  AC_SUBST(BROWSER_TESTS_MODIFICATION)
 ])

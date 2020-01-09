@@ -37,6 +37,9 @@ exception statement from your version.
 
 package net.sourceforge.jnlp.security;
 
+import net.sourceforge.jnlp.security.UnsignedAppletTrustWarningPanel.UnsignedWarningAction;
+import net.sourceforge.jnlp.security.appletextendedsecurity.ExecuteUnsignedApplet;
+
 import java.awt.Dialog.ModalityType;
 import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
@@ -70,6 +73,7 @@ public class SecurityDialogs {
         SINGLE_CERT_INFO,
         ACCESS_WARNING,
         NOTALLSIGNED_WARNING,
+        UNSIGNED_WARNING,   /* requires confirmation with 'high-security' setting */
         APPLET_WARNING,
         AUTHENTICATION,
     }
@@ -86,6 +90,7 @@ public class SecurityDialogs {
         VERIFIED,
         UNVERIFIED,
         NOTALLSIGNED,
+        UNSIGNED,           /* requires confirmation with 'high-security' setting */
         SIGNING_ERROR
     }
 
@@ -173,6 +178,26 @@ public class SecurityDialogs {
     }
 
     /**
+     * Shows a warning dialog for when a plugin applet is unsigned.
+     * This is used with 'high-security' setting.
+     *
+     * @return true if permission was granted by the user, false otherwise.
+     */
+    public static UnsignedWarningAction showUnsignedWarningDialog(JNLPFile file) {
+
+        if (!shouldPromptUser()) {
+            return new UnsignedWarningAction(ExecuteUnsignedApplet.NO, false);
+        }
+
+        final SecurityDialogMessage message = new SecurityDialogMessage();
+        message.dialogType = DialogType.UNSIGNED_WARNING;
+        message.accessType = AccessType.UNSIGNED;
+        message.file = file;
+
+        return (UnsignedWarningAction)getUserResponse(message);
+    }
+
+    /**
      * Shows a security warning dialog according to the specified type of
      * access. If <code>type</code> is one of AccessType.VERIFIED or
      * AccessType.UNVERIFIED, extra details will be available with regards
@@ -180,12 +205,12 @@ public class SecurityDialogs {
      *
      * @param accessType the type of warning dialog to show
      * @param file the JNLPFile associated with this warning
-     * @param jarSigner the JarSigner used to verify this application
+     * @param certVerifier the JarCertVerifier used to verify this application
      *
      * @return true if the user accepted the certificate
      */
     public static boolean showCertWarningDialog(AccessType accessType,
-            JNLPFile file, CertVerifier jarSigner) {
+            JNLPFile file, CertVerifier certVerifier) {
 
         if (!shouldPromptUser()) {
             return false;
@@ -195,7 +220,7 @@ public class SecurityDialogs {
         message.dialogType = DialogType.CERT_WARNING;
         message.accessType = accessType;
         message.file = file;
-        message.certVerifier = jarSigner;
+        message.certVerifier = certVerifier;
 
         Object selectedValue = getUserResponse(message);
 

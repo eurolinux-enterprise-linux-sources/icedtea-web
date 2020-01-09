@@ -39,20 +39,13 @@ exception statement from your version. */
 #ifndef __ICEDTEANPPLUGIN_H__
 #define	__ICEDTEANPPLUGIN_H__
 
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-#include <nsThreadUtils.h>
-#else
 #include <npapi.h>
 #include <npruntime.h>
 #include <npfunctions.h>
-#endif
 
 // GLib includes.
 #include <glib.h>
 #include <glib/gstdio.h>
-
-// GTK includes.
-#include <gtk/gtk.h>
 
 #include "IcedTeaPluginUtils.h"
 #include "IcedTeaPluginRequestProcessor.h"
@@ -66,8 +59,8 @@ struct ITNPPluginData
 {
   // A unique identifier for this plugin window.
   gchar* instance_id;
-  // The applet tag sent to Java side
-  gchar* applet_tag;
+  // The parameter list string sent to Java side
+  gchar* parameters_string;
   // Mutex to protect appletviewer_alive.
   GMutex* appletviewer_mutex;
   // Back-pointer to the plugin instance to which this data belongs.

@@ -1,4 +1,4 @@
-/* VoidPluginCallRequest -- represent Java-to-JavaScript requests
+/* PluginMessageHandlerWorker -- worker thread for handling messages
    Copyright (C) 2008  Red Hat
 
 This file is part of IcedTea.
@@ -42,14 +42,29 @@ class PluginMessageHandlerWorker extends Thread {
     private boolean free = true;
     private final boolean isPriorityWorker;
     private final int id;
-    private String message;
+    private volatile String message;
     private PluginStreamHandler streamHandler;
     private PluginMessageConsumer consumer;
+
+    public synchronized void notifyHasWork() {
+        notifyAll();
+    }
+
+    public synchronized void waitForWork() {
+        try {
+            // Do not wait indefinitely to avoid the potential of deadlock
+            wait(1000);
+        } catch (InterruptedException e) {
+            // Should not typically occur
+            e.printStackTrace();
+        }
+    }
 
     public PluginMessageHandlerWorker(
                 PluginMessageConsumer consumer,
                 PluginStreamHandler streamHandler, int id,
                 boolean isPriorityWorker) {
+        super("PluginMessageHandlerWorker" + id);
 
         this.id = id;
         this.streamHandler = streamHandler;
@@ -92,16 +107,10 @@ class PluginMessageHandlerWorker extends Thread {
                 free();
 
             } else {
+                waitForWork();
 
-                // Sleep when there is nothing to do
-                try {
-                    Thread.sleep(Integer.MAX_VALUE);
-                    PluginDebug.debug("Consumer thread ", id, " sleeping...");
-                } catch (InterruptedException ie) {
-                    PluginDebug.debug("Consumer thread ", id, " woken...");
-                    // nothing.. someone woke us up, see if there 
-                    // is work to do
-                }
+                // Someone woke us up, see if there is work to do
+                PluginDebug.debug("Consumer thread ", id, " woken...");
             }
         }
     }
@@ -119,9 +128,6 @@ class PluginMessageHandlerWorker extends Thread {
     public void free() {
         synchronized (this) {
             this.free = true;
-
-            // Signal the consumer that we are done in case it was waiting
-            consumer.notifyWorkerIsFree(this);
         }
     }
 

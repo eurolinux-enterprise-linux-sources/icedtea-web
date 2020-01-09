@@ -17,6 +17,7 @@
 package net.sourceforge.jnlp.runtime;
 
 import java.awt.Window;
+import java.io.File;
 import java.net.URL;
 import java.security.AccessControlContext;
 import java.security.AccessController;
@@ -146,7 +147,14 @@ public class ApplicationInstance {
     private void addMenuAndDesktopEntries() {
         XDesktopEntry entry = new XDesktopEntry(file);
         ShortcutDesc sd = file.getInformation().getShortcut();
-
+        File possibleDesktopFile = entry.getLinuxDesktopIconFile();
+        if (possibleDesktopFile.exists()) {
+            if (JNLPRuntime.isDebug()) {
+                System.out.println("ApplicationInstance.addMenuAndDesktopEntries(): file - "
+                        + possibleDesktopFile.getAbsolutePath() + " already exists. Not proceeding with desktop additions");
+            }
+            return;
+        }
         if (shouldCreateShortcut(sd)) {
             entry.createDesktopShortcut();
         }
@@ -171,6 +179,9 @@ public class ApplicationInstance {
      * @return true if a desktop shortcut should be created
      */
     private boolean shouldCreateShortcut(ShortcutDesc sd) {
+        if (JNLPRuntime.isTrustAll()) {
+            return (sd != null && sd.onDesktop());
+        }
         String currentSetting = JNLPRuntime.getConfiguration()
                 .getProperty(DeploymentConfiguration.KEY_CREATE_DESKTOP_SHORTCUT);
         boolean createShortcut = false;
@@ -231,8 +242,8 @@ public class ApplicationInstance {
 
         PrivilegedAction<Object> installProps = new PrivilegedAction<Object>() {
             public Object run() {
-                for (int i = 0; i < props.length; i++) {
-                    System.setProperty(props[i].getKey(), props[i].getValue());
+                for (PropertyDesc propDesc : props) {
+                    System.setProperty(propDesc.getKey(), propDesc.getValue());
                 }
 
                 return null;
@@ -272,8 +283,7 @@ public class ApplicationInstance {
 
         try {
             // destroy resources
-            for (int i = 0; i < weakWindows.size(); i++) {
-                Window w = weakWindows.get(i);
+            for (Window w : weakWindows) {
                 if (w != null)
                     w.dispose();
             }

@@ -35,6 +35,8 @@ import net.sourceforge.jnlp.cache.CacheUtil;
 import net.sourceforge.jnlp.cache.UpdatePolicy;
 import net.sourceforge.jnlp.security.viewer.CertificateViewer;
 import net.sourceforge.jnlp.services.ServiceUtil;
+import sun.awt.AppContext;
+import sun.awt.SunToolkit;
 
 /**
  * This is the main entry point for the JNLP client.  The main
@@ -53,8 +55,8 @@ public final class Boot implements PrivilegedAction<Void> {
     // todo: decide whether a spawned netx (external launch)
     // should inherit the same options as this instance (store argv?)
 
-    private static final String name = Boot.class.getPackage().getImplementationTitle();
-    private static final String version = Boot.class.getPackage().getImplementationVersion();
+    public static final String name = Boot.class.getPackage().getImplementationTitle();
+    public static final String version = Boot.class.getPackage().getImplementationVersion();
 
     /** the text to display before launching the about link */
     private static final String aboutMessage = ""
@@ -113,6 +115,9 @@ public final class Boot implements PrivilegedAction<Void> {
      * Launch the JNLP file specified by the command-line arguments.
      */
     public static void main(String[] argsIn) {
+        if (AppContext.getAppContext() == null) {
+            SunToolkit.createNewAppContext();
+        }
         args = argsIn;
 
         if (null != getOption("-viewer")) {
@@ -203,7 +208,7 @@ public final class Boot implements PrivilegedAction<Void> {
             Launcher launcher = new Launcher(false);
             launcher.setParserSettings(settings);
             launcher.setInformationToMerge(extra);
-            launcher.launch(getFileLocation(), true);
+            launcher.launch(getFileLocation());
         } catch (LaunchException ex) {
             // default handler prints this
         } catch (Exception ex) {

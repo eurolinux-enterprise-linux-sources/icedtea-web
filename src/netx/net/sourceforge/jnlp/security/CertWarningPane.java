@@ -96,7 +96,7 @@ public class CertWarningPane extends SecurityDialogPanel {
     private void addComponents() {
         AccessType type = parent.getAccessType();
         JNLPFile file = parent.getFile();
-        Certificate c = parent.getJarSigner().getPublisher();
+        Certificate c = parent.getCertVerifier().getPublisher(null);
 
         String name = "";
         String publisher = "";
@@ -134,7 +134,7 @@ public class CertWarningPane extends SecurityDialogPanel {
 
         // Labels
         String topLabelText = "";
-        String bottomLabelText = parent.getJarSigner().getRootInCacerts() ?
+        String bottomLabelText = parent.getCertVerifier().getRootInCacerts() ?
                                  R("STrustedSource") : R("SUntrustedSource");
         String propertyName = "";
         String iconLocation = "net/sourceforge/jnlp/resources/";
@@ -240,7 +240,7 @@ public class CertWarningPane extends SecurityDialogPanel {
 
     private class MoreInfoButtonListener implements ActionListener {
         public void actionPerformed(ActionEvent e) {
-            SecurityDialog.showMoreInfoDialog(parent.getJarSigner(),
+            SecurityDialog.showMoreInfoDialog(parent.getCertVerifier(),
                                 parent);
         }
     }
@@ -253,7 +253,7 @@ public class CertWarningPane extends SecurityDialogPanel {
             if (alwaysTrust != null && alwaysTrust.isSelected()) {
                 try {
                     KeyStore ks = KeyStores.getKeyStore(Level.USER, Type.CERTS);
-                    X509Certificate c = (X509Certificate) parent.getJarSigner().getPublisher();
+                    X509Certificate c = (X509Certificate) parent.getCertVerifier().getPublisher(null);
                     CertificateUtils.addToKeyStore(c, ks);
                     File keyStoreFile = new File(KeyStores.getKeyStoreLocation(Level.USER, Type.CERTS));
                     if (!keyStoreFile.isFile()) {

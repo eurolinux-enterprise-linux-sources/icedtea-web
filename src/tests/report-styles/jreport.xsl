@@ -38,6 +38,14 @@ exception statement from your version.
  -->
 <xsl:stylesheet xmlns:xsl="http://www.w3.org/1999/XSL/Transform" version="1.0">
   <xsl:template match="/">
+<!--
+when parameter is mentioned (no matter of value) eg:
+<xsl:param name="logs">none</xsl:param>
+then xsltproc is not able to change its value since 2008
+This parameter is providing relative path to file with logs which is then linked from this index
+Bad luck that xsltproc is not able to use default values.
+If there is no need for linking, please use value "none" for this variable
+-->
 <html>
  <head>
     <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
@@ -53,11 +61,17 @@ exception statement from your version.
     <xsl:value-of select="/testsuite/date"/>
     <br/>
     <h2>Result: (<xsl:value-of select="round(sum(/testsuite/testcase/@time))"/>s)</h2>
+    <h4>In brackets are KnownToFail values if any</h4>
     <div class="tablee">
       <div class="row">
         <div class="cell1">TOTAL: </div>
         <div class="cell2">
           <xsl:value-of select="/testsuite/stats/summary/total"/>
+          <xsl:choose>
+           <xsl:when test="/testsuite/stats/summary/total/@known-to-fail!=0">
+             (<xsl:value-of select="/testsuite/stats/summary/total/@known-to-fail"/>)
+           </xsl:when>
+         </xsl:choose>
         </div>
         <div class="space-line"></div>
       </div>
@@ -65,6 +79,11 @@ exception statement from your version.
         <div class="cell1">passed: </div>
         <div class="cell2">
           <xsl:value-of select="/testsuite/stats/summary/passed"/>
+          <xsl:choose>
+           <xsl:when test="/testsuite/stats/summary/passed/@known-to-fail!=0">
+             (<xsl:value-of select="/testsuite/stats/summary/passed/@known-to-fail"/>)
+           </xsl:when>
+         </xsl:choose>
         </div>
         <div class="space-line"></div>
       </div>
@@ -72,6 +91,11 @@ exception statement from your version.
         <div class="cell1">failed: </div>
         <div class="cell2">
           <xsl:value-of select="/testsuite/stats/summary/failed"/>
+          <xsl:choose>
+           <xsl:when test="/testsuite/stats/summary/failed/@known-to-fail!=0">
+             (<xsl:value-of select="/testsuite/stats/summary/failed/@known-to-fail"/>)
+           </xsl:when>
+         </xsl:choose>
         </div>
         <div class="space-line"></div>
       </div>
@@ -79,6 +103,11 @@ exception statement from your version.
         <div class="cell1">ignored: </div>
         <div class="cell2">
           <xsl:value-of select="/testsuite/stats/summary/ignored"/>
+          <xsl:choose>
+           <xsl:when test="/testsuite/stats/summary/ignored/@known-to-fail!=0">
+             (<xsl:value-of select="/testsuite/stats/summary/ignored/@known-to-fail"/>)
+           </xsl:when>
+         </xsl:choose>
         </div>
         <div class="space-line"></div>
       </div>
@@ -102,6 +131,12 @@ exception statement from your version.
   </xsl:attribute><xsl:value-of select="@name"/>
 (<xsl:value-of select="@time"/>ms):
 </a>
+    <xsl:for-each select="bugs/bug">
+      <a>
+        <xsl:attribute name="href"><xsl:value-of select="normalize-space(.)"/></xsl:attribute>
+        <xsl:value-of select="@visibleName"/>
+      </a>;
+    </xsl:for-each>
       </div>
       <blockquote>
         <div class="tablee">
@@ -109,6 +144,11 @@ exception statement from your version.
             <div class="cell1">TOTAL: </div>
             <div class="cell2">
               <xsl:value-of select="total"/>
+              <xsl:choose>
+               <xsl:when test="total/@known-to-fail!=0">
+                 (<xsl:value-of select="total/@known-to-fail"/>)
+               </xsl:when>
+             </xsl:choose>
             </div>
             <div class="space-line"></div>
           </div>
@@ -116,6 +156,11 @@ exception statement from your version.
             <div class="cell1">passed: </div>
             <div class="cell2">
               <xsl:value-of select="passed"/>
+              <xsl:choose>
+               <xsl:when test="passed/@known-to-fail!=0">
+                 (<xsl:value-of select="passed/@known-to-fail"/>)
+               </xsl:when>
+             </xsl:choose>
             </div>
             <div class="space-line"></div>
           </div>
@@ -123,6 +168,11 @@ exception statement from your version.
             <div class="cell1">failed: </div>
             <div class="cell2">
               <xsl:value-of select="failed"/>
+              <xsl:choose>
+               <xsl:when test="failed/@known-to-fail!=0">
+                 (<xsl:value-of select="failed/@known-to-fail"/>)
+               </xsl:when>
+             </xsl:choose>
             </div>
             <div class="space-line"></div>
           </div>
@@ -130,6 +180,11 @@ exception statement from your version.
             <div class="cell1">ignored: </div>
             <div class="cell2">
               <xsl:value-of select="ignored"/>
+              <xsl:choose>
+               <xsl:when test="ignored/@known-to-fail!=0">
+                 (<xsl:value-of select="ignored/@known-to-fail"/>)
+               </xsl:when>
+             </xsl:choose>
             </div>
             <div class="space-line"></div>
           </div>
@@ -146,6 +201,9 @@ exception statement from your version.
       <div>
         <xsl:attribute name="class">
           <xsl:choose>
+            <xsl:when test="@ignored">
+           ignored
+            </xsl:when>
             <xsl:when test="error">
            failed
             </xsl:when>
@@ -161,23 +219,76 @@ exception statement from your version.
         </a>
         <div class="lineHeader">
           <div class="clazz">
-            <xsl:value-of select="@classname"/>
-          </div>
+            <xsl:choose>
+              <xsl:when test="$logs!='none'">
+                <a class="logLink" target="new">
+                  <xsl:attribute name="href">
+                    <xsl:value-of select="$logs"/>#<xsl:value-of select="@classname"/>.<xsl:value-of select="@name"/>
+                  </xsl:attribute>
+                  <xsl:value-of select="@classname"/>
+                </a>
+              </xsl:when>
+              <xsl:otherwise>
+                <xsl:value-of select="@classname"/>
+              </xsl:otherwise>
+             </xsl:choose>
+           </div>
           <xsl:text disable-output-escaping="no"> - </xsl:text>
           <div class="method">
             <xsl:value-of select="@name"/>
+            <xsl:for-each select="bugs/bug">
+            <xsl:text disable-output-escaping="no"> - </xsl:text>
+              <a>
+                <xsl:attribute name="href"><xsl:value-of select="normalize-space(.)"/></xsl:attribute>
+                <xsl:value-of select="@visibleName"/>
+              </a>
+            </xsl:for-each>
           </div>
         </div>
         <div class="result">
           <xsl:choose>
             <xsl:when test="not(error)">
               <div class="status">
-         PASSED (<xsl:value-of select="@time"/>s)
+         <xsl:choose>
+           <xsl:when test="@ignored">
+             IGNORED (<xsl:value-of select="@time"/>s) 
+           </xsl:when>
+           <xsl:otherwise>
+             PASSED (<xsl:value-of select="@time"/>s) 
+           </xsl:otherwise>
+         </xsl:choose>
+         <xsl:choose>
+           <xsl:when test="@known-to-fail">
+             <xsl:choose>
+               <xsl:when test="@known-to-fail=true">
+                 <b><xsl:text>" - WARNING This test is known to fail, but have passed!</xsl:text></b>
+               </xsl:when>
+               <xsl:otherwise>
+                 <b><xsl:text> - This test is known to fail</xsl:text></b>
+               </xsl:otherwise>
+             </xsl:choose>
+           </xsl:when>
+          </xsl:choose>
+          <xsl:choose>
+           <xsl:when test="@remote">
+             <i><xsl:text> - This test is running remote content, note that failures may be caused by broken target application or connection</xsl:text></i>
+           </xsl:when>
+         </xsl:choose>
          </div>
             </xsl:when>
             <xsl:otherwise>
               <div class="status">
-        FAILED (<xsl:value-of select="@time"/>s)
+        FAILED (<xsl:value-of select="@time"/>s) 
+         <xsl:choose>
+           <xsl:when test="@known-to-fail">
+             <b><xsl:text> - This test is known to fail</xsl:text></b>
+           </xsl:when>
+         </xsl:choose>
+         <xsl:choose>
+           <xsl:when test="@remote">
+             <i><xsl:text> - This test is running remote content, note that failures may be caused by broken target application or connection</xsl:text></i>
+           </xsl:when>
+         </xsl:choose>
          </div>
               <div class="wtrace">
                 <div class="theader">

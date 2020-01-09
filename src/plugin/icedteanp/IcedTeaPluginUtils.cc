@@ -39,6 +39,7 @@ exception statement from your version. */
 #include "IcedTeaNPPlugin.h"
 #include "IcedTeaScriptablePluginObject.h"
 #include "IcedTeaPluginUtils.h"
+#include <fstream>
 
 /**
  * Misc. utility functions used by the plugin
@@ -146,22 +147,20 @@ IcedTeaPluginUtilities::constructMessagePrefix(int context, int reference,
 void
 IcedTeaPluginUtilities::JSIDToString(void* id, std::string* result)
 {
-
-	char* id_str = (char*) malloc(sizeof(char)*20); // max = long long = 8446744073709551615 == 19 chars
+	char id_str[NUM_STR_BUFFER_SIZE];
 
 	if (sizeof(void*) == sizeof(long long))
 	{
-		sprintf(id_str, "%llu", id);
+		snprintf(id_str, NUM_STR_BUFFER_SIZE, "%llu", id);
 	}
 	else
 	{
-		sprintf(id_str, "%lu", id); // else use long
+		snprintf(id_str, NUM_STR_BUFFER_SIZE, "%lu", id); // else use long
 	}
 
 	result->append(id_str);
 
 	PLUGIN_DEBUG("Converting pointer %p to %s\n", id, id_str);
-	free(id_str);
 }
 
 /**
@@ -257,12 +256,9 @@ IcedTeaPluginUtilities::releaseReference()
 void
 IcedTeaPluginUtilities::itoa(int i, std::string* result)
 {
-	// largest possible integer is 10 digits long
-	char* int_str = (char*) malloc(sizeof(char)*11);
-	sprintf(int_str, "%d", i);
+	char int_str[NUM_STR_BUFFER_SIZE];
+	snprintf(int_str, NUM_STR_BUFFER_SIZE, "%d", i);
 	result->append(int_str);
-
-	free(int_str);
 }
 
 /**
@@ -292,7 +288,7 @@ IcedTeaPluginUtilities::freeStringPtrVector(std::vector<std::string*>* v)
  *
  * @param str The string to split
  * @param The delimiters to split on
- * @return A string vector containing the aplit components
+ * @return A string vector containing the split components
  */
 
 std::vector<std::string*>*
@@ -302,7 +298,7 @@ IcedTeaPluginUtilities::strSplit(const char* str, const char* delim)
 	v->reserve(strlen(str)/2);
 	char* copy;
 
-	// Tokening is done on a copy
+	// Tokenization is done on a copy
 	copy = (char*) malloc (sizeof(char)*strlen(str) + 1);
 	strcpy(copy, str);
 
@@ -313,11 +309,12 @@ IcedTeaPluginUtilities::strSplit(const char* str, const char* delim)
 	{
 	    // Allocation on heap since caller has no way to knowing how much will
 	    // be needed. Make sure caller cleans up!
-		std::string* s = new std::string();
-		s->append(tok_ptr);
-		v->push_back(s);
-		tok_ptr = strtok (NULL, delim);
+	    std::string* s = new std::string();
+	    s->append(tok_ptr);
+	    v->push_back(s);
+	    tok_ptr = strtok (NULL, delim);
 	}
+        free(copy);
 
 	return v;
 }
@@ -371,19 +368,17 @@ IcedTeaPluginUtilities::convertStringToUTF8(std::string* str, std::string* utf_s
 
 	ostream << length;
 
-	// UTF-8 characters are 4-bytes max + space + '\0'
-	char* hex_value = (char*) malloc(sizeof(char)*10);
+	char hex_value[NUM_STR_BUFFER_SIZE];
 
 	for (int i = 0; i < str->length(); i++)
 	{
-		sprintf(hex_value, " %hx", str->at(i));
+		snprintf(hex_value, NUM_STR_BUFFER_SIZE," %hx", str->at(i));
 		ostream << hex_value;
 	}
 
 	utf_str->clear();
 	*utf_str = ostream.str();
 
-	free(hex_value);
 	PLUGIN_DEBUG("Converted %s to UTF-8 string %s\n", str->c_str(), utf_str->c_str());
 }
 
@@ -680,155 +675,178 @@ IcedTeaPluginUtilities::printNPVariant(NPVariant variant)
 void
 IcedTeaPluginUtilities::NPVariantToString(NPVariant variant, std::string* result)
 {
-	char* str = (char*) malloc(sizeof(char)*32); // enough for everything except string
-    bool was_string_already = false;
-    if (NPVARIANT_IS_VOID(variant))
-    {
-        sprintf(str, "%p", variant);
-    }
-    else if (NPVARIANT_IS_NULL(variant))
-    {
-    	sprintf(str, "NULL");
-    }
-    else if (NPVARIANT_IS_BOOLEAN(variant))
-    {
-    	if (NPVARIANT_TO_BOOLEAN(variant))
-    		sprintf(str, "true");
-    	else
-    		sprintf(str, "false");
-    }
-    else if (NPVARIANT_IS_INT32(variant))
-    {
-    	sprintf(str, "%d", NPVARIANT_TO_INT32(variant));
-    }
-    else if (NPVARIANT_IS_DOUBLE(variant))
-    {
-    	sprintf(str, "%f", NPVARIANT_TO_DOUBLE(variant));;
-    }
-    else if (NPVARIANT_IS_STRING(variant))
-    {
-    	result->append(IcedTeaPluginUtilities::NPVariantAsString(variant));
-    	was_string_already = true;
-    }
+  char conv_str[NUM_STR_BUFFER_SIZE]; // conversion buffer
+  bool was_string_already = false;
+
+  if (NPVARIANT_IS_STRING(variant))
+  {
+    result->append(IcedTeaPluginUtilities::NPVariantAsString(variant));
+    was_string_already = true;
+  }
+  else if (NPVARIANT_IS_VOID(variant))
+  {
+    snprintf(conv_str, NUM_STR_BUFFER_SIZE, "%p", variant);
+  }
+  else if (NPVARIANT_IS_NULL(variant))
+  {
+    snprintf(conv_str, NUM_STR_BUFFER_SIZE, "NULL");
+  }
+  else if (NPVARIANT_IS_BOOLEAN(variant))
+  {
+    if (NPVARIANT_TO_BOOLEAN(variant))
+      snprintf(conv_str, NUM_STR_BUFFER_SIZE, "true");
     else
+      snprintf(conv_str, NUM_STR_BUFFER_SIZE, "false");
+  }
+  else if (NPVARIANT_IS_INT32(variant))
+  {
+    snprintf(conv_str, NUM_STR_BUFFER_SIZE, "%d", NPVARIANT_TO_INT32(variant));
+  }
+  else if (NPVARIANT_IS_DOUBLE(variant))
+  {
+    snprintf(conv_str, NUM_STR_BUFFER_SIZE, "%f", NPVARIANT_TO_DOUBLE(variant));
+  }
+  else
+  {
+    snprintf(conv_str, NUM_STR_BUFFER_SIZE, "[Object %p]", variant);
+  }
+
+  if (!was_string_already){
+    result->append(conv_str);
+  }
+}
+
+/**
+ * Convert either a void, boolean, or a number
+ */
+static void
+javaPrimitiveResultToNPVariant(const std::string& value, NPVariant* variant)
+{
+    if (value == "void")
     {
-        sprintf(str, "[Object %p]", variant);
+        PLUGIN_DEBUG("Method call returned void\n");
+        VOID_TO_NPVARIANT(*variant);
+    } else if (value == "null")
+    {
+        PLUGIN_DEBUG("Method call returned null\n");
+        NULL_TO_NPVARIANT(*variant);
+    } else if (value == "true")
+    {
+        PLUGIN_DEBUG("Method call returned a boolean (true)\n");
+        BOOLEAN_TO_NPVARIANT(true, *variant);
+    } else if (value == "false")
+    {
+        PLUGIN_DEBUG("Method call returned a boolean (false)\n");
+        BOOLEAN_TO_NPVARIANT(false, *variant);
+    } else
+    {
+        double d = strtod(value.c_str(), NULL);
+
+        // See if it is convertible to int
+        if (value.find(".") != std::string::npos || d < -(0x7fffffffL - 1L) || d > 0x7fffffffL)
+        {
+            PLUGIN_DEBUG("Method call returned a double %f\n", d);
+            DOUBLE_TO_NPVARIANT(d, *variant);
+        } else
+        {
+            int32_t i = (int32_t) d;
+            PLUGIN_DEBUG("Method call returned an int %d\n", i);
+            INT32_TO_NPVARIANT(i, *variant);
+        }
     }
-    if (!was_string_already)
-        result->append(str);
-    free(str);
+}
+
+static bool
+javaStringResultToNPVariant(const std::string& jobject_id, NPVariant* variant)
+{
+    JavaRequestProcessor jrequest_processor;
+    JavaResultData* jstring_result = jrequest_processor.getString(jobject_id);
+
+    if (jstring_result->error_occurred)
+    {
+        return false;
+    }
+
+    std::string str = *jstring_result->return_string;
+
+    PLUGIN_DEBUG( "Method call returned a string:\"%s\"\n", str.c_str());
+
+    *variant = IcedTeaPluginUtilities::NPVariantStringCopy(str);
+
+    return true;
+}
+
+static bool
+javaJSObjectResultToNPVariant(const std::string& js_id, NPVariant* variant)
+{
+    NPVariant* result_variant = (NPVariant*) IcedTeaPluginUtilities::stringToJSID(js_id);
+    *variant = *result_variant;
+    return true;
+}
+
+static bool
+javaObjectResultToNPVariant(NPP instance, const std::string& jobject_id, NPVariant* variant)
+{
+    // Reference the class object so we can construct an NPObject with it and the instance
+
+    JavaRequestProcessor jrequest_processor;
+    JavaResultData* jclass_result = jrequest_processor.getClassID(jobject_id);
+
+    if (jclass_result->error_occurred)
+    {
+        return false;
+    }
+
+    std::string jclass_id = *jclass_result->return_string;
+
+    NPObject* obj;
+    if (jclass_id.at(0) == '[') // array
+    {
+        obj = IcedTeaScriptableJavaPackageObject::get_scriptable_java_object(instance, jclass_id,
+                jobject_id, true);
+    } else
+    {
+        obj = IcedTeaScriptableJavaPackageObject::get_scriptable_java_object(instance, jclass_id,
+                jobject_id, false);
+    }
+
+    OBJECT_TO_NPVARIANT(obj, *variant);
+
+    return true;
 }
 
 bool
 IcedTeaPluginUtilities::javaResultToNPVariant(NPP instance,
-                                              std::string* java_value,
-                                              NPVariant* variant)
+        std::string* java_value, NPVariant* variant)
 {
-    JavaRequestProcessor java_request = JavaRequestProcessor();
-    JavaResultData* java_result;
+    int literal_n = sizeof("literalreturn"); // Accounts for one space char
+    int jsobject_n = sizeof("jsobject"); // Accounts for one space char
 
-    if (java_value->find("literalreturn") == 0)
+    if (strncmp("literalreturn ", java_value->c_str(), literal_n) == 0)
     {
-        // 'literalreturn ' == 14 to skip
-        std::string value = java_value->substr(14);
+        javaPrimitiveResultToNPVariant(java_value->substr(literal_n), variant);
+    } else if (strncmp("jsobject ", java_value->c_str(), jsobject_n) == 0)
+    {
+        javaJSObjectResultToNPVariant(java_value->substr(jsobject_n), variant);
+    } else
+    {
+        std::string jobject_id = *java_value;
 
-        // VOID/BOOLEAN/NUMBER
+        JavaRequestProcessor jrequest_processor;
+        JavaResultData* jclassname_result = jrequest_processor.getClassName(jobject_id);
 
-        if (value == "void")
-        {
-            PLUGIN_DEBUG("Method call returned void\n");
-            VOID_TO_NPVARIANT(*variant);
-        } else if (value == "null")
-        {
-            PLUGIN_DEBUG("Method call returned null\n");
-            NULL_TO_NPVARIANT(*variant);
-        }else if (value == "true")
-        {
-            PLUGIN_DEBUG("Method call returned a boolean (true)\n");
-            BOOLEAN_TO_NPVARIANT(true, *variant);
-        } else if (value == "false")
-        {
-            PLUGIN_DEBUG("Method call returned a boolean (false)\n");
-            BOOLEAN_TO_NPVARIANT(false, *variant);
-        } else
-        {
-            double d = strtod(value.c_str(), NULL);
-
-            // See if it is convertible to int
-            if (value.find(".") != std::string::npos ||
-                d < -(0x7fffffffL - 1L) ||
-                d > 0x7fffffffL)
-            {
-                PLUGIN_DEBUG("Method call returned a double %f\n", d);
-                DOUBLE_TO_NPVARIANT(d, *variant);
-            } else
-            {
-                int32_t i = (int32_t) d;
-                PLUGIN_DEBUG("Method call returned an int %d\n", i);
-                INT32_TO_NPVARIANT(i, *variant);
-            }
-        }
-    } else {
-        // Else this is a complex java object
-
-        // To keep code a little bit cleaner, we create variables with proper descriptive names
-        std::string return_obj_instance_id = std::string();
-        std::string return_obj_class_id = std::string();
-        std::string return_obj_class_name = std::string();
-        return_obj_instance_id.append(*java_value);
-
-        // Find out the class name first, because string is a special case
-        java_result = java_request.getClassName(return_obj_instance_id);
-
-        if (java_result->error_occurred)
+        if (jclassname_result->error_occurred)
         {
             return false;
         }
 
-        return_obj_class_name.append(*(java_result->return_string));
-
-        if (return_obj_class_name == "java.lang.String")
+        // Special-case for NPString if string
+        if (*jclassname_result->return_string == "java.lang.String")
         {
-            // String is a special case as NPVariant can handle it directly
-            java_result = java_request.getString(return_obj_instance_id);
-
-            if (java_result->error_occurred)
-            {
-                return false;
-            }
-
-            // needs to be on the heap
-            NPUTF8* return_str = (NPUTF8*) malloc(sizeof(NPUTF8)*java_result->return_string->size() + 1);
-            strcpy(return_str, java_result->return_string->c_str());
-
-            PLUGIN_DEBUG("Method call returned a string: \"%s\"\n", return_str);
-            STRINGZ_TO_NPVARIANT(return_str, *variant);
-
-        } else {
-
-            // Else this is a regular class. Reference the class object so
-            // we can construct an NPObject with it and the instance
-            java_result = java_request.getClassID(return_obj_instance_id);
-
-            if (java_result->error_occurred)
-            {
-                return false;
-            }
-
-            return_obj_class_id.append(*(java_result->return_string));
-
-            NPObject* obj;
-
-            if (return_obj_class_name.find('[') == 0) // array
-                obj = IcedTeaScriptableJavaPackageObject::get_scriptable_java_object(
-                                instance,
-                                return_obj_class_id, return_obj_instance_id, true);
-            else
-                obj = IcedTeaScriptableJavaPackageObject::get_scriptable_java_object(
-                                                instance,
-                                                return_obj_class_id, return_obj_instance_id, false);
-
-            OBJECT_TO_NPVARIANT(obj, *variant);
+            return javaStringResultToNPVariant(jobject_id, variant);
+        } else // Else this needs a java object wrapper
+        {
+            return javaObjectResultToNPVariant(instance, jobject_id, variant);
         }
     }
 
@@ -902,15 +920,9 @@ IcedTeaPluginUtilities::decodeURL(const gchar* url, gchar** decoded_url)
 std::string
 IcedTeaPluginUtilities::NPVariantAsString(NPVariant variant)
 {
-#if MOZILLA_VERSION_COLLAPSED < 1090200
-  return std::string(
-    NPVARIANT_TO_STRING(variant).utf8characters,
-    NPVARIANT_TO_STRING(variant).utf8length);
-#else
   return std::string(
     NPVARIANT_TO_STRING(variant).UTF8Characters,
     NPVARIANT_TO_STRING(variant).UTF8Length);
-#endif
 }
 
 /**
@@ -920,6 +932,21 @@ IcedTeaPluginUtilities::NPVariantAsString(NPVariant variant)
  * @param func The function to post
  * @param data Arguments to *func
  */
+NPString IcedTeaPluginUtilities::NPStringCopy(const std::string& result) {
+    char* utf8 = (char*)browser_functions.memalloc(result.size() + 1);
+    strncpy(utf8, result.c_str(), result.size() + 1);
+
+    NPString npstr = {utf8, result.size()};
+    return npstr;
+}
+
+NPVariant IcedTeaPluginUtilities::NPVariantStringCopy(const std::string& result) {
+    NPString npstr = NPStringCopy(result);
+    NPVariant npvar;
+    STRINGN_TO_NPVARIANT(npstr.UTF8Characters, npstr.UTF8Length, npvar);
+    return npvar;
+}
+
 void
 IcedTeaPluginUtilities::callAndWaitForResult(NPP instance, void (*func) (void *), AsyncCallThreadData* data)
 {
@@ -982,6 +1009,24 @@ IcedTeaPluginUtilities::postPluginThreadAsyncCall(NPP instance, void (*func) (vo
 }
 
 /**
+ * Returns a vector of gchar* pointing to the elements of the vector string passed in.
+ * @param stringVec The vector of strings reference.
+ */
+std::vector<gchar*>
+IcedTeaPluginUtilities::vectorStringToVectorGchar(const std::vector<std::string>* stringVec)
+{
+  std::vector<gchar*> charVec;
+
+  for (int i = 0; i < stringVec->size(); i++)
+  {
+    gchar* element = (gchar*) stringVec->at(i).c_str(); //cast from const char
+    charVec.push_back(element);
+  }
+  charVec.push_back(NULL);
+  return charVec;
+}
+
+/**
  * Runs through the async call wait queue and executes all calls
  *
  * @param param Ignored -- required to conform to NPN_PluginThreadAsynCall API
@@ -1013,6 +1058,21 @@ processAsyncCallQueue(void* param /* ignored */)
         }
     } while(1);
 }
+
+void IcedTeaPluginUtilities::trim(std::string& str) {
+	size_t start = str.find_first_not_of(" \t\n"), end = str.find_last_not_of(" \t\n");
+	if (start == std::string::npos) {
+        	return;
+	}
+	str = str.substr(start, end - start + 1);
+}
+
+bool IcedTeaPluginUtilities::file_exists(std::string filename)
+{
+    std::ifstream infile(filename.c_str());
+    return infile.good();
+}
+
 
 /******************************************
  * Begin JavaMessageSender implementation *
@@ -1065,7 +1125,7 @@ MessageBus::MessageBus()
 	if(ret)
 		PLUGIN_DEBUG("Error: Unable to initialize message queue mutex: %d\n", ret);
 
-	PLUGIN_DEBUG("Mutexs %p and %p initialized\n", &subscriber_mutex, &msg_queue_mutex);
+	PLUGIN_DEBUG("Mutexes %p and %p initialized\n", &subscriber_mutex, &msg_queue_mutex);
 }
 
 /**
@@ -1129,27 +1189,24 @@ MessageBus::unSubscribe(BusSubscriber* b)
 void
 MessageBus::post(const char* message)
 {
-	char* msg = (char*) malloc(sizeof(char)*strlen(message) + 1);
 	bool message_consumed = false;
-
-	// consumer frees this memory
-	strcpy(msg, message);
 
 	PLUGIN_DEBUG("Trying to lock %p...\n", &msg_queue_mutex);
 	pthread_mutex_lock(&subscriber_mutex);
 
-    PLUGIN_DEBUG("Message %s received on bus. Notifying subscribers.\n", msg);
+    PLUGIN_DEBUG("Message %s received on bus. Notifying subscribers.\n", message);
 
     std::list<BusSubscriber*>::const_iterator i;
     for( i = subscribers.begin(); i != subscribers.end() && !message_consumed; ++i ) {
-    	PLUGIN_DEBUG("Notifying subscriber %p of %s\n", *i, msg);
-    	message_consumed = ((BusSubscriber*) *i)->newMessageOnBus(msg);
+    	PLUGIN_DEBUG("Notifying subscriber %p of %s\n", *i, message);
+    	message_consumed = ((BusSubscriber*) *i)->newMessageOnBus(message);
     }
 
     pthread_mutex_unlock(&subscriber_mutex);
 
     if (!message_consumed)
-    	PLUGIN_DEBUG("Warning: No consumer found for message %s\n", msg);
+    	PLUGIN_DEBUG("Warning: No consumer found for message %s\n", message);
 
     PLUGIN_DEBUG("%p unlocked...\n", &msg_queue_mutex);
 }
+

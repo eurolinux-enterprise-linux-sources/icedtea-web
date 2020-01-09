@@ -28,6 +28,8 @@ import javax.swing.Timer;
 import javax.jnlp.*;
 
 import net.sourceforge.jnlp.runtime.*;
+import net.sourceforge.jnlp.util.ImageResources;
+import net.sourceforge.jnlp.util.ScreenFinder;
 
 /**
  * Show the progress of downloads.
@@ -57,9 +59,11 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
 
     /** the display window */
     private static JFrame frame;
+    private static final Object frameMutex = new Object();
 
     /** shared constraint */
     static GridBagConstraints vertical;
+    static GridBagConstraints verticalNoClean;
     static GridBagConstraints verticalIndent;
     static {
         vertical = new GridBagConstraints();
@@ -67,6 +71,9 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
         vertical.weightx = 1.0;
         vertical.fill = GridBagConstraints.HORIZONTAL;
         vertical.anchor = GridBagConstraints.WEST;
+
+        verticalNoClean = new GridBagConstraints();
+        verticalNoClean.weightx = 1.0;
 
         verticalIndent = (GridBagConstraints) vertical.clone();
         verticalIndent.insets = new Insets(0, 10, 3, 0);
@@ -97,30 +104,48 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
     public DownloadServiceListener getListener(ApplicationInstance app, String downloadName, URL resources[]) {
         DownloadPanel result = new DownloadPanel(downloadName);
 
-        if (frame == null) {
-            frame = new JFrame(downloading + "...");
-            frame.getContentPane().setLayout(new GridBagLayout());
+        synchronized (frameMutex) {
+            if (frame == null) {
+                frame=createDownloadIndicatorFrame(true);
+            }
+
+            if (resources != null) {
+                for (URL url : resources) {
+                    result.addProgressPanel(url, null);
+                }
+            }
+
+            frame.getContentPane().add(result, vertical);
+            frame.pack();
+            placeFrameToLowerRight();
+            result.addComponentListener(new ComponentAdapter() {
+                @Override
+                public void componentResized(ComponentEvent e) {
+                    placeFrameToLowerRight();
+                }
+            });
+
+            frame.setVisible(true);
+
+            return result;
         }
+    }
 
-        if (resources != null)
-            for (int i = 0; i < resources.length; i++)
-                result.addProgressPanel(resources[i], null);
+     public static JFrame createDownloadIndicatorFrame(boolean undecorated) throws HeadlessException {
+        JFrame f = new JFrame(downloading + "...");
+        f.setUndecorated(undecorated);
+        f.setIconImages(ImageResources.INSTANCE.getApplicationImages());
+        f.getContentPane().setLayout(new GridBagLayout());
+        return f;
+    }
 
-        frame.getContentPane().add(result, vertical);
-        frame.pack();
-
-        if (!frame.isVisible()) {
-            Dimension screenSize = Toolkit.getDefaultToolkit().getScreenSize();
-            Insets insets = Toolkit.getDefaultToolkit().getScreenInsets(frame.getGraphicsConfiguration());
-            Dimension screen = new Dimension(screenSize.width - insets.left,
-                    screenSize.height - insets.top);
-            frame.setLocation(screen.width - frame.getWidth(),
-                              screen.height - frame.getHeight());
-        }
-
-        frame.setVisible(true);
-
-        return result;
+    /**
+     * This places indicator to lower right corner of active monitor.
+     */
+    private static void placeFrameToLowerRight() throws HeadlessException {
+       Rectangle bounds = ScreenFinder.getCurrentScreenSizeWithoutBounds();
+        frame.setLocation(bounds.width+bounds.x - frame.getWidth(),
+                bounds.height+bounds.y - frame.getHeight());
     }
 
     /**
@@ -134,11 +159,16 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
 
         ActionListener hider = new ActionListener() {
             public void actionPerformed(ActionEvent evt) {
-                if (frame.getContentPane().getComponentCount() == 1)
-                    frame.setVisible(false);
+                synchronized(frameMutex) {
+                    frame.getContentPane().remove((DownloadPanel) listener);
+                    frame.pack();
 
-                frame.getContentPane().remove((DownloadPanel) listener);
-                frame.pack();
+                    if (frame.getContentPane().getComponentCount() == 0) {
+                        frame.setVisible(false);
+                        frame.dispose();
+                        frame = null;
+                    }
+                }
             }
         };
 
@@ -151,13 +181,31 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
      * Groups the url progress in a panel.
      */
     static class DownloadPanel extends JPanel implements DownloadServiceListener {
+        private final DownloadPanel self;
 
+        private static enum States{
+            ONE_JAR, COLLAPSED, DETAILED;
+         }
+        
+        private static final String DETAILS=R("ButShowDetails");
+        private static final String HIDE_DETAILS=R("ButHideDetails");   
         /** the download name */
         private String downloadName;
-
         /** Downloading part: */
         private JLabel header = new JLabel();
-
+        /** Show/hide detailsButton button: */
+        private final JButton detailsButton;
+        private static final URL magnifyGlassUrl = ClassLoader.getSystemResource("net/sourceforge/jnlp/resources/showDownloadDetails.png");
+        private static final URL redCrossUrl = ClassLoader.getSystemResource("net/sourceforge/jnlp/resources/hideDownloadDetails.png");
+        private static final Icon magnifyGlassIcon = new ImageIcon(magnifyGlassUrl);
+        private static final Icon redCrossIcon = new ImageIcon(redCrossUrl);
+        /** used  instead of detailsButton button in case of one jar*/
+        private JLabel delimiter = new JLabel("");  
+        /** all already created progress bars*/
+        private List<ProgressPanel> progressPanels = new ArrayList<ProgressPanel>();
+        private States state=States.ONE_JAR;
+        private ProgressPanel mainProgressPanel;
+        
         /** list of URLs being downloaded */
         private List<URL> urls = new ArrayList<URL>();
 
@@ -169,12 +217,52 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
          * name.
          */
         protected DownloadPanel(String downloadName) {
+            self = this;
             setLayout(new GridBagLayout());
-
             this.downloadName = downloadName;
-            this.add(header, vertical);
+            this.add(header, verticalNoClean);
             header.setFont(header.getFont().deriveFont(Font.BOLD));
+            this.add(delimiter, vertical);
+            detailsButton = new JButton(magnifyGlassIcon);
+            int w = magnifyGlassIcon.getIconWidth();
+            int h = magnifyGlassIcon.getIconHeight();
+            detailsButton.setPreferredSize(new Dimension(w + 2, h + 2));
+            detailsButton.addActionListener(new ActionListener() {
+                @Override
+                public void actionPerformed(ActionEvent e) {
+                    if (state == States.DETAILED) {
+                        state = States.COLLAPSED;
+                        detailsButton.setToolTipText(DETAILS);
+                        detailsButton.setIcon(magnifyGlassIcon);
+                        for (ProgressPanel progressPanel : progressPanels) {
+                            remove(progressPanel);
+                        }
+                        add(mainProgressPanel, verticalIndent);
+                        recreateFrame(true);
+                    } else {
+                        state = States.DETAILED;
+                        detailsButton.setToolTipText(HIDE_DETAILS);
+                        detailsButton.setIcon(redCrossIcon);
+                        remove(mainProgressPanel);
+                        for (ProgressPanel progressPanel : progressPanels) {
+                            add(progressPanel, verticalIndent);
+                        }
+                        recreateFrame(false);
+                    }
+                }
 
+                public void recreateFrame(boolean undecorated) throws HeadlessException {
+                    JFrame oldFrame = frame;
+                    frame = createDownloadIndicatorFrame(undecorated);
+                    frame.getContentPane().add(self, vertical);
+                    synchronized (frameMutex) {
+                        frame.pack();
+                        placeFrameToLowerRight();
+                    }
+                    frame.setVisible(true);
+                    oldFrame.dispose();
+                }
+            });
             setOverallPercent(0);
         }
 
@@ -184,12 +272,32 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
         protected void addProgressPanel(URL url, String version) {
             if (!urls.contains(url)) {
                 ProgressPanel panel = new ProgressPanel(url, version);
-
-                add(panel, verticalIndent);
-                frame.pack();
-
+                if (state != States.COLLAPSED) {
+                    add(panel, verticalIndent);
+                }
+                progressPanels.add(panel);
                 urls.add(url);
-                panels.add(panel);
+                panels.add(panel); 
+                //download indicator does not know about added jars
+                //When only one jar is added to downlaod queue then its progress is 
+                //shown, and there is no show detail button.
+                //When second one is added, then it already knows that there will
+                //be two or more jars, so it swap to collapsed state in count of two.
+                //no later, no sooner
+                if (panels.size() == 2){
+                    remove(panels.get(0));
+                    remove(panels.get(1));
+                    remove(delimiter);
+                    add(detailsButton,vertical);
+                    mainProgressPanel=new ProgressPanel();
+                    add(mainProgressPanel, verticalIndent);
+                    state=States.COLLAPSED;
+                }
+                synchronized (frameMutex) {
+                    frame.pack();
+                    placeFrameToLowerRight();
+                }
+
             }
         }
 
@@ -205,10 +313,10 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
                         addProgressPanel(url, version);
 
                     setOverallPercent(overallPercent);
-
                     ProgressPanel panel = panels.get(urls.indexOf(url));
                     panel.setProgress(readSoFar, total);
                     panel.repaint();
+
                 }
             };
             SwingUtilities.invokeLater(r);
@@ -216,12 +324,27 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
 
         /**
          * Sets the overall percent completed.
+         * should be called via invokeLater
          */
         public void setOverallPercent(int percent) {
             // don't get whole string from resource and sub in
             // values because it'll be doing a MessageFormat for
             // each update.
             header.setText(downloading + " " + downloadName + ": " + percent + "% " + complete + ".");
+            Container c = header.getParent();
+            //we need to adapt both panels and also frame to new length of header text
+            while (c != null) {
+                c.invalidate();
+                c.validate();
+                if (c instanceof  Window){
+                    ((Window) c).pack();
+                }
+                c=c.getParent();
+            }
+            if (mainProgressPanel != null) {
+                mainProgressPanel.setProgress(percent, 100);
+                mainProgressPanel.repaint();
+            }
         }
 
         /**
@@ -262,12 +385,28 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
 
         private long total;
         private long readSoFar;
+        private Dimension size = new Dimension(80, 15);
 
+        ProgressPanel() {
+            bar.setMinimumSize(size);
+            bar.setPreferredSize(size);
+            bar.setOpaque(false);
+
+            setLayout(new GridBagLayout());
+
+            GridBagConstraints gbc = new GridBagConstraints();
+            styleGridBagConstraints(gbc);
+            add(bar, gbc);
+        }
+        
         ProgressPanel(URL url, String version) {
-            JLabel location = new JLabel(" " + url.getHost() + "/" + url.getFile());
+            this(" " + url.getHost() + "/" + url.getFile(),version);
+        }
+        ProgressPanel(String caption, String version) {
+            JLabel location = new JLabel(caption);
 
-            bar.setMinimumSize(new Dimension(80, 15));
-            bar.setPreferredSize(new Dimension(80, 15));
+            bar.setMinimumSize(size);
+            bar.setPreferredSize(size);
             bar.setOpaque(false);
 
             setLayout(new GridBagLayout());
@@ -277,12 +416,8 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
             gbc.fill = GridBagConstraints.NONE;
             gbc.gridwidth = GridBagConstraints.RELATIVE;
             add(bar, gbc);
-
-            gbc.insets = new Insets(0, 3, 0, 0);
-            gbc.weightx = 1.0;
-            gbc.fill = GridBagConstraints.HORIZONTAL;
-            gbc.gridwidth = GridBagConstraints.REMAINDER;
-            gbc.anchor = GridBagConstraints.WEST;
+            
+            styleGridBagConstraints(gbc);
             add(location, gbc);
         }
 
@@ -310,6 +445,14 @@ public class DefaultDownloadIndicator implements DownloadIndicator {
                 g.setColor(Color.blue);
                 g.fillRect(x + 1, y + 1, divide - 1, h - 1);
             }
+        }
+
+        private void styleGridBagConstraints(GridBagConstraints gbc) {
+            gbc.insets = new Insets(0, 3, 0, 0);
+            gbc.weightx = 1.0;
+            gbc.fill = GridBagConstraints.HORIZONTAL;
+            gbc.gridwidth = GridBagConstraints.REMAINDER;
+            gbc.anchor = GridBagConstraints.WEST;
         }
     };
 

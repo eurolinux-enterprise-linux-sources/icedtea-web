@@ -275,7 +275,7 @@ PluginRequestProcessor::call(std::vector<std::string*>* message_parts)
     JavaResultData* java_result;
     NPVariant* result_variant;
     std::string result_variant_jniid = std::string();
-    NPVariant* args_array;
+    NPVariant* args_array = NULL;
     AsyncCallThreadData thread_data = AsyncCallThreadData();
 
     reference = atoi(message_parts->at(3)->c_str());
@@ -413,7 +413,7 @@ PluginRequestProcessor::setMember(std::vector<std::string*>* message_parts)
     member = (NPVariant*) (IcedTeaPluginUtilities::stringToJSID(*(message_parts->at(5))));
     propertyNameID = *(message_parts->at(6));
 
-    if (*(message_parts->at(7)) == "literalreturn")
+    if (*(message_parts->at(7)) == "literalreturn" || *(message_parts->at(7)) == "jsobject" )
     {
         value.append(*(message_parts->at(7)));
         value.append(" ");
@@ -471,7 +471,7 @@ PluginRequestProcessor::setMember(std::vector<std::string*>* message_parts)
  *
  * This is a static function, called in another thread. Since certain data
  * can only be requested from the main thread in Mozilla, this function
- * does whatever it can seperately, and then makes an internal request that
+ * does whatever it can separately, and then makes an internal request that
  * causes _getMember to do the rest of the work.
  *
  * @param message_parts The request message
@@ -838,17 +838,10 @@ _eval(void* data)
     window_ptr = (NPObject*) call_data->at(1);
     script_str = (std::string*) call_data->at(2);
 
-#if MOZILLA_VERSION_COLLAPSED < 1090200
-    script.utf8characters = script_str->c_str();
-    script.utf8length = script_str->size();
-
-    PLUGIN_DEBUG("Evaluating: %s\n", script_str->c_str());
-#else
     script.UTF8Characters = script_str->c_str();
     script.UTF8Length = script_str->size();
 
     PLUGIN_DEBUG("Evaluating: %s\n", script_str->c_str());
-#endif
 
     ((AsyncCallThreadData*) data)->call_successful = browser_functions.evaluate(instance, window_ptr, &script, eval_variant);
     IcedTeaPluginUtilities::printNPVariant(*eval_variant);
@@ -994,7 +987,7 @@ _loadURL(void* data) {
 
     ((AsyncCallThreadData*) data)->result_ready = true;
 
-    g_free(decoded_url);
+    free(decoded_url);
     decoded_url = NULL;
 
     PLUGIN_DEBUG("_loadURL returning %d\n", ((AsyncCallThreadData*) data)->call_successful);

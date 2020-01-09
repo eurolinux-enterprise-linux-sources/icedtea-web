@@ -27,6 +27,7 @@ import java.io.*;
 import javax.swing.*;
 
 import net.sourceforge.jnlp.*;
+import net.sourceforge.jnlp.splashscreen.SplashController;
 import net.sourceforge.jnlp.util.*;
 
 /**
@@ -116,8 +117,8 @@ public class AppletEnvironment implements AppletContext, AppletStub {
         destroyed = true;
 
         List<AppletAudioClip> clips = weakClips.hardList();
-        for (int i = 0; i < clips.size(); i++) {
-            clips.get(i).dispose();
+        for (AppletAudioClip clip : clips) {
+            clip.dispose();
         }
     }
 
@@ -128,6 +129,15 @@ public class AppletEnvironment implements AppletContext, AppletStub {
     public Container getAppletFrame() {
         // TODO: rename this method to getAppletContainer ?
         return cont;
+    }
+
+     /**
+     * container must be SplashContoler
+     * 
+     */
+    public SplashController getSplashControler() {
+        
+        return (SplashController)cont;
     }
 
     /**

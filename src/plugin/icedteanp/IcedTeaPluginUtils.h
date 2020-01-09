@@ -56,15 +56,8 @@ exception statement from your version. */
 #include <vector>
 
 #include <npapi.h>
-
-#if MOZILLA_VERSION_COLLAPSED < 1090100
-#include <npupp.h>
-#else
-#include <npapi.h>
+#include <glib.h>
 #include <npruntime.h>
-#endif
-
-#include "IcedTeaNPPlugin.h"
 
 #define PLUGIN_DEBUG(...) \
   do                                                          \
@@ -95,6 +88,10 @@ exception statement from your version. */
     ((*c >= '0' && *c <= '9') || \
      (*c >= 'a' && *c <= 'f') || \
      (*c >= 'A' && *c <= 'F'))
+
+//long long max ~ 19 chars + terminator
+//leave some room for converting strings like "<var> = %d"
+const size_t NUM_STR_BUFFER_SIZE = 32;
 
 /*
  * This struct holds data specific to a Java operation requested by the plugin
@@ -208,6 +205,12 @@ class IcedTeaPluginUtilities
     	/* Copies a variant data type into a C++ string */
     	static std::string NPVariantAsString(NPVariant variant);
 
+        /* This must be freed with browserfunctions.memfree */
+        static NPString NPStringCopy(const std::string& result);
+
+        /* This must be freed with browserfunctions.releasevariantvalue */
+        static NPVariant NPVariantStringCopy(const std::string& result);
+
     	/* Frees the given vector and the strings that its contents point to */
     	static void freeStringPtrVector(std::vector<std::string*>* v);
 
@@ -239,7 +242,7 @@ class IcedTeaPluginUtilities
 
     	static void printNPVariant(NPVariant variant);
 
-    	static void NPVariantToString(NPVariant variant, std::string* result);
+        static void NPVariantToString(NPVariant variant, std::string* result);
 
         static bool javaResultToNPVariant(NPP instance,
                                           std::string* java_result,
@@ -265,8 +268,16 @@ class IcedTeaPluginUtilities
 
     	static void decodeURL(const char* url, char** decoded_url);
 
+    	/* Returns a vector of gchar* pointing to the elements of the vector string passed in*/
+    	static std::vector<gchar*> vectorStringToVectorGchar(const std::vector<std::string>* stringVec);
+
     	/* Posts call in async queue and waits till execution completes */
     	static void callAndWaitForResult(NPP instance, void (*func) (void *), AsyncCallThreadData* data);
+
+        /*cutting whitespaces from end and start of string*/
+        static void trim(std::string& str);
+        static bool file_exists(std::string filename);
+
 };
 
 /*
@@ -332,5 +343,7 @@ class MessageBus
            after this function returns) */
         void post(const char* message);
 };
+
+
 
 #endif // __ICEDTEAPLUGINUTILS_H__

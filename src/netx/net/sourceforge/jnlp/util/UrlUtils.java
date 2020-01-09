@@ -37,9 +37,34 @@ exception statement from your version.
 
 package net.sourceforge.jnlp.util;
 
+import java.io.File;
+import java.io.IOException;
+import java.io.UnsupportedEncodingException;
+import java.net.MalformedURLException;
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.URL;
+import java.net.URLDecoder;
 
 public class UrlUtils {
+    private static final String UTF8 = "utf-8";
+
+    public static URL normalizeUrlAndStripParams(URL url, boolean encodeFileUrls) {
+        try {
+            String[] urlParts = url.toString().split("\\?");
+            URL strippedUrl = new URL(urlParts[0]); 
+            return normalizeUrl(strippedUrl, encodeFileUrls);
+        } catch (IOException e) {
+            e.printStackTrace();
+        } catch (URISyntaxException e) {
+            e.printStackTrace();
+        }
+        return url;
+    }
+
+    public static URL normalizeUrlAndStripParams(URL url) {
+        return normalizeUrlAndStripParams(url, false);
+    }
 
     public static boolean isLocalFile(URL url) {
 
@@ -49,5 +74,82 @@ public class UrlUtils {
             return true;
         }
         return false;
+    }
+
+    /* Decode a percent-encoded URL. Catch checked exceptions and log. */
+    public static URL decodeUrlQuietly(URL url) {
+        try {
+            return new URL(URLDecoder.decode(url.toString(), UTF8));
+        } catch (IOException e) {
+            e.printStackTrace();
+            return url;
+        }
+    }
+
+    /* Use the URI syntax check of 'toURI' to see if it matches RFC2396.
+     * See http://www.ietf.org/rfc/rfc2396.txt */
+    public static boolean isValidRFC2396Url(URL url) {
+        try {
+            url.toURI();
+            return true;
+        } catch (URISyntaxException e) {
+            return false;
+        }
+    }
+
+    /* Ensure a URL is properly percent-encoded.
+     * Certain usages require local-file URLs to be encoded, eg for code-base & document-base. */
+    public static URL normalizeUrl(URL url, boolean encodeFileUrls) throws MalformedURLException, UnsupportedEncodingException, URISyntaxException {
+        if (url == null) {
+            return null;
+        }
+
+        String protocol = url.getProtocol();
+        boolean shouldEncode = (encodeFileUrls || !"file".equals(protocol));
+
+        // PR1465: We should not call 'URLDecoder.decode' on RFC2396-compliant URLs
+        if (protocol == null || !shouldEncode || url.getPath() == null || isValidRFC2396Url(url)) {
+            return url;
+        }
+
+        //Decode the URL before encoding
+        URL decodedURL = new URL(URLDecoder.decode(url.toString(), UTF8));
+
+        //Create URI with the decoded URL
+        URI uri = new URI(decodedURL.getProtocol(), null, decodedURL.getHost(), decodedURL.getPort(), decodedURL.getPath(), decodedURL.getQuery(), null);
+
+        //Returns the encoded URL
+        URL encodedURL = new URL(uri.toASCIIString());
+
+        return encodedURL;
+    }
+
+    /* Ensure a URL is properly percent-encoded. Does not encode local-file URLs. */
+    public static URL normalizeUrl(URL url) throws MalformedURLException, UnsupportedEncodingException, URISyntaxException {
+        return normalizeUrl(url, false);
+    }
+
+    /* Ensure a URL is properly percent-encoded. Catch checked exceptions and log. */
+    public static URL normalizeUrlQuietly(URL url, boolean encodeFileUrls) {
+        try {
+            return normalizeUrl(url, encodeFileUrls);
+        } catch (MalformedURLException e) {
+            e.printStackTrace();
+        } catch (UnsupportedEncodingException e) {
+            e.printStackTrace();
+        } catch (URISyntaxException e) {
+            e.printStackTrace();
+        }
+        return url;
+    }
+
+    /* Ensure a URL is properly percent-encoded. Catch checked exceptions and log. */
+    public static URL normalizeUrlQuietly(URL url) {
+        return normalizeUrlQuietly(url, false);
+    }
+
+    /* Decode a URL as a file, being tolerant of URLs with mixed encoded & decoded portions. */
+    public static File decodeUrlAsFile(URL url) {
+        return new File(decodeUrlQuietly(url).getFile());
     }
 }
