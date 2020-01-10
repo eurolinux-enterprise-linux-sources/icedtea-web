@@ -18,7 +18,7 @@
 
 Name:		icedtea-web
 Version:	1.7.1
-Release:	1%{?dist}
+Release:	2%{?dist}
 Summary:	Additional Java components for OpenJDK - Java browser plug-in and Web Start implementation
 
 Group:      Applications/Internet
@@ -26,6 +26,12 @@ License:    LGPLv2+ and GPLv2 with exceptions
 URL:        http://icedtea.classpath.org/wiki/IcedTea-Web
 Source0:    http://icedtea.classpath.org/download/source/%{name}-%{version}.tar.gz
 Patch0:     bashCompDirHardcodedAgain.patch
+Patch1:     issue1.patch
+Patch2:     issue2.patch
+Patch3:     issue3.patch
+Patch4:     PreventiveleQueue.patch
+Patch11:    issue1-bin.patch
+Patch33:    issue3-bin.patch
 
 BuildRequires:  jpackage-utils
 BuildRequires:  %{preffered_java}-devel
@@ -41,6 +47,8 @@ BuildRequires:  libappstream-glib
 BuildRequires:  tagsoup
 # rhino is used as JS evaluator in testtime
 BuildRequires:      rhino
+# to apply binary tests for CVEs
+BuildRequires:      git
 
 # For functionality and the OpenJDK dirs
 Requires:      %{preffered_java}
@@ -106,6 +114,18 @@ This package contains ziped sources of the IcedTea-Web project.
 %prep
 %setup -q
 %patch0 -p1
+%patch1 -p1
+%patch2 -p1
+%patch3 -p1
+%patch4 -p1
+if [ -e ../.git ] ; then
+  mv ../.git ../ggit
+fi
+git apply --no-index --binary -v %{PATCH11}
+git apply --no-index --binary -v %{PATCH33}
+if [ -e ../ggit ] ; then
+  mv ../ggit ../.git
+fi
 
 %build
 autoreconf -vfi
@@ -143,9 +163,12 @@ desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications policyeditor.desktop
 
 # install MetaInfo file for firefox
-DESTDIR=%{buildroot} appstream-util install metadata/%{name}.metainfo.xml
+mkdir -p %{buildroot}/%{_datadir}/appdata ; # just because appstream-util install do not work in rhel7
+# broken in rhel7 DESTDIR=%{buildroot} appstream-util install metadata/%{name}.metainfo.xml
+cp metadata/%{name}.metainfo.xml %{buildroot}/%{_datadir}/appdata/
 # install MetaInfo file for javaws
-DESTDIR=%{buildroot} appstream-util install metadata/%{name}-javaws.appdata.xml
+# broken in rhel7 DESTDIR=%{buildroot} appstream-util install metadata/%{name}-javaws.appdata.xml
+cp metadata/%{name}-javaws.appdata.xml %{buildroot}/%{_datadir}/appdata/
 
 # maven fragments generation
 mkdir -p $RPM_BUILD_ROOT%{_javadir}
@@ -234,6 +257,14 @@ exit 0
 %license COPYING
 
 %changelog
+* Thu Jul 18 2019 Jiri Vanek <jvanek@redhat.com> 1.7.2-16
+- added patch1, patch4 and patch11 to fix CVE-2019-10182
+- added patch2 to fix CVE-2019-10181
+- added patch3 and patch33 to fix CVE-2019-10185
+- Resolves: rhbz#1724958 
+- Resolves: rhbz#1725928 
+- Resolves: rhbz#1724989 
+
 * Mon Dec 18 2017 Jiri Vanek <jvanek@redhat.com> 1.7.1-1
 * bump to 1.7.1
 - Resolves: rhbz#1475411

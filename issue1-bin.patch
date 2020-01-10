@@ -1,0 +1,29 @@
+commit 78cf73473dda5ceee3eecda5169621f36b93c3db
+Author: Jiri Vanek <jvanek@redhat.com>
+Date:   Tue Jun 18 15:37:47 2019 +0200
+
+    Fixed bug when relative path (..) could leak up (even out of cache)
+
+diff --git a/tests/netx/unit/net/sourceforge/jnlp/runtime/j1.jar b/tests/netx/unit/net/sourceforge/jnlp/runtime/j1.jar
+new file mode 100644
+index 0000000000000000000000000000000000000000..080383629e9349101b25ad3b33b9950f456c4e8e
+GIT binary patch
+literal 940
+zcmWIWW@Zs#VBp|jI8$@gj{yjnKm-tQGO#fCx`sIFdiuHP|2xINz|0VUqL}B}?nD=$
+zLRTOL8i7#k>*(j{<{BKL=j-;__snS@Z(Y5MyxzK6=gyqp9At3C_`%a6JuhD!Pv48B
+zt5`TAUPvC1mXy-W_#v*U_I!z!#dC4dC*rEp7_Mf2D*9N&h-B+wpcBjVOyp!385rgO
+zF%QsIkJOx;d_%qDoW$bd+yGzi!wv$qm(}j7^={j?tnS+b#|}B3rtMwgjy58qN^v%-
+zr7NR9DH;m?;ru6Kt5NZR{m0@XH$ya>z8h@*d~f#5?Z5wi{>l1)gISt)i*Ct=OD@;l
+z_*XNnbC`d@B5b9WA4h5a`?iERY2}kH$gK>Co8qbR`L#ipq~WB1r7io)t!K6QFO+Y8
+zd4#_!X6fXGd0U#-oH_o<C$sQ%%(23<iUm{oSY|P0^Ih9`@b^1yuY}77#kNV#$mE>+
+z^UmoEt>Z`SH7e?KQVyAIp2S(6=9KzR)LP?4JI`drh1(g_I@n{6=G^}(w(~fj&p(CQ
+zEQPnz7azUaU|eYS-QHn+&BOAdoDhYFthyHUm+r0--Ec49^|kwnXP%k`HyjN1b(^+I
+z_w;^f+%a%4>;;D6o#rRf3Bb_H24Zdo8CWQ0C6*<IhHx@4Z@tSCJEv4AwzPtqfsy3}
+zGXn!lJ5Z^%hVQA9K4Bi`JazQKK6soxdD1*&#j{620U8Y+BGXl-F|6G5=Zr|}og-&#
+zdLK+$bY@S9t*veAkwssU&SotLQs7vpqvv_{>S=x5i`opQrayU-sgc^?8+>UCo7T#w
+ztDZ6eqneRP1eBO?q(`6=kN`^RMAwR*IuZJGflRnoq_m1`0=ATfFkvx}iJb00I^~!_
+tc>r7JN`N&2lPklL#+N_}suL2{tdOuq3+DiDRyL3>79ivRYUu-KN&w$EG4%id
+
+literal 0
+HcmV?d00001
+
