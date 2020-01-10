@@ -1,0 +1,32 @@
+--- netx/net/sourceforge/jnlp/security/policyeditor/PolicyEditorPermissions.java
++++ netx/net/sourceforge/jnlp/security/policyeditor/PolicyEditorPermissions.java
+@@ -193,6 +193,10 @@
+             return false;
+         }
+ 
++/**
++Return title for policy.
++@return title
++*/
+         public String getTitle() {
+             return title + " ˇ";
+         }
+--- netx/net/sourceforge/jnlp/security/package-info.java
++++ netx/net/sourceforge/jnlp/security/package-info.java
+@@ -32,6 +32,7 @@
+ statement from your version.*/
+ /**
+  *<pre>
++{@code
+         ITW-thread(s)               | dialogs-thread                                                                                                                                  X
+                                     |                                                                                                                                                 X
+    presteps in SecurtyDialogs       |                                                                                                                                                 X
+@@ -75,7 +76,7 @@
+             |                       |                                                                                                                                                 X
+    continue accordingly             |                                                                                                                                                 X
+                                                                                                                                                                                       X
+-
++}
+  *</pre>
+  */
+ package net.sourceforge.jnlp.security;

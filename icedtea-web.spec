@@ -1,25 +1,29 @@
 # Version of java
-%define javaver 1.7.0
+%define javaver 1.8.0
 
 # Alternatives priority
-%define priority 17000
+%define priority 18000
 
-
-%define javadir     %{_jvmdir}/java-openjdk
-%define jredir      %{_jvmdir}/jre-openjdk
+%define javadir     %{_jvmdir}/java-%{javaver}-openjdk
+%define jredir      %{_jvmdir}/jre-%{javaver}-openjdk
 %define javaplugin  libjavaplugin.so.%{_arch}
 
 %define binsuffix      .itweb
 
 Name:		icedtea-web
-Version:	1.5.2
-Release:	0%{?dist}
+Version:	1.6.1
+Release:	4%{?dist}
 Summary:	Additional Java components for OpenJDK - Java browser plug-in and Web Start implementation
 
 Group:      Applications/Internet
 License:    LGPLv2+ and GPLv2 with exceptions
 URL:        http://icedtea.classpath.org/wiki/IcedTea-Web
 Source0:    http://icedtea.classpath.org/download/source/%{name}-%{version}.tar.gz
+Source1:    icedtea-web.metainfo.xml
+Source2:    icedtea-web-javaws.appdata.xml
+Patch0:     javadocFixes.patch
+Patch1:		donLogToFileBeforeFileLogsInitiate.patch
+Patch2:		fileLogInitializationError-1.6.patch
 
 BuildRequires:  java-%{javaver}-openjdk-devel
 BuildRequires:  desktop-file-utils
@@ -29,6 +33,7 @@ BuildRequires:  autoconf
 BuildRequires:  automake
 BuildRequires:  xulrunner-devel
 BuildRequires:  junit4
+BuildRequires:  libappstream-glib
 # new in 1.5 to have  clean up for malformed XMLs
 BuildRequires:  tagsoup
 # rhino is used as JS evaluator in testtime
@@ -79,6 +84,9 @@ This package contains Javadocs for the IcedTea-Web project.
 
 %prep
 %setup -q
+%patch0
+%patch1 -p1
+%patch2 -p1
 
 %build
 autoreconf -vfi
@@ -97,22 +105,28 @@ make %{?_smp_mflags}
 rm -rf $RPM_BUILD_ROOT
 make install DESTDIR=$RPM_BUILD_ROOT
 
+# icedteaweb-completion is currently not handled by make nor make install
+mkdir -p $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d/
+cp icedteaweb-completion $RPM_BUILD_ROOT%{_sysconfdir}/bash_completion.d/
+
 # Move javaws man page to a more specific name
 mv $RPM_BUILD_ROOT/%{_mandir}/man1/javaws.1 $RPM_BUILD_ROOT/%{_mandir}/man1/javaws-itweb.1
 
 # Install desktop files.
 install -d -m 755 $RPM_BUILD_ROOT%{_datadir}/{applications,pixmaps}
-cp javaws.png $RPM_BUILD_ROOT%{_datadir}/pixmaps
 desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications javaws.desktop
 desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications itweb-settings.desktop
 desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications policyeditor.desktop
-ln -s  %{_mandir}/man1/javaws-itweb.1   $RPM_BUILD_ROOT/%{_mandir}/man1/icedtea-web.1
+
+# install MetaInfo file for firefox
+DESTDIR=%{buildroot} appstream-util install %{SOURCE1}
 
 %check
 make check
+appstream-util validate $RPM_BUILD_ROOT/%{_datadir}/appdata/*.xml
 
 %post
 alternatives \
@@ -139,12 +153,17 @@ exit 0
 
 %files
 %defattr(-,root,root,-)
+%{_sysconfdir}/bash_completion.d/
 %{_prefix}/bin/*
 %{_libdir}/IcedTeaPlugin.so
 %{_datadir}/applications/*
 %{_datadir}/icedtea-web
 %{_datadir}/man/man1/*
+%{_datadir}/man/cs/man1/*
+%{_datadir}/man/de/man1/*
+%{_datadir}/man/pl/man1/*
 %{_datadir}/pixmaps/*
+%{_datadir}/appdata/*.xml
 %doc NEWS README COPYING
 
 %files javadoc
@@ -153,6 +172,35 @@ exit 0
 %doc COPYING
 
 %changelog
+* Wed Oct 14 2015 Jiri Vanek <jvanek@redhat.com> 1.6.1-4
+- added and and applied patch2 fileLogInitializationError-1.6.patch to prevent 
+consequences 1268909
+- Resolves: rhbz#1217153
+
+* Tue Sep 29 2015 Jiri Vanek <jvanek@redhat.com> 1.6.1-3
+- added and applied patch1 donLogToFileBeforeFileLogsInitiate.patch
+- Resolves: rhbz#1217153
+
+* Mon Sep 21 2015 Jiri Vanek <jvanek@redhat.com> 1.6.1-2
+- added and applied patch0 javadocFixes.patch 
+- Resolves: rhbz#1217153
+
+* Fri Sep 11 2015 Jiri Vanek <jvanek@redhat.com> 1.6.1-1
+- updated to upstream release 1.6.1
+- metadata xml files enhanced for javaws
+- forced to use jdk8 by default
+- Resolves: rhbz#1217153
+
+* Thu Aug 27 2015 Jiri Vanek <jvanek@redhat.com> 1.6.0-2
+- added gnome-software support
+- Resolves: rhbz#1217153
+
+* Thu Nov 27 2014 Jiri Vanek <jvanek@redhat.com> 1.6.0-1
+- update to upstream 1.6
+- made to use jdk8 (rh1184970)
+- it will be necessary for 1.6.1 anyway (rh1233687)
+- Resolves: rhbz#1217153
+
 * Thu Nov 27 2014 Jiri Vanek <jvanek@redhat.com> 1.5.2-0
 - update to upstream 1.5.2
 - enabled tagsoup
