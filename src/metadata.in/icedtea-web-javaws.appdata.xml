@@ -1,9 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- Copyright 2014 Richard Hughes <richard@hughsie.com> -->
 <component type="desktop">
 <!-- <component> -->
   <id>javaws.desktop</id>
-  <name>icedtea-web</name>
+  <name>%{name}</name>
   <name>Java</name>
   <summary>Javaws implementation from OpenJDK</summary>
 <!--   <provides>
@@ -27,7 +26,7 @@ It have also  possibility to turn all security off and just enjoy legacy web (on
    </description>
   <url type="homepage">http://icedtea.classpath.org/wiki/IcedTea-Web</url>
   <metadata_license>CC0-1.0</metadata_license>
-  <updatecontact>jvanek_at_redhat.com</updatecontact>
+  <updatecontact>distro-pkg-dev@openjdk.java.net</updatecontact>
   <mimetypes>
 ​    <mimetype>text/jnlp</mimetype>
   </mimetypes>
@@ -38,7 +37,7 @@ It have also  possibility to turn all security off and just enjoy legacy web (on
   </screenshot>
   <screenshot>
    <image>http://icedtea.classpath.org/wiki/images/Fullysigned.png</image>
-   <caption>Run in sandbox dialof</caption>
+   <caption>Run in sandbox dialog</caption>
   </screenshot>
   <screenshot>
    <image>http://icedtea.classpath.org/wiki/images/Policyeditor-in-use.png</image>

@@ -10,8 +10,10 @@
 
 %define binsuffix      .itweb
 
+%define preffered_java  java-%{javaver}-openjdk
+
 Name:		icedtea-web
-Version:	1.6.1
+Version:	1.6.2
 Release:	4%{?dist}
 Summary:	Additional Java components for OpenJDK - Java browser plug-in and Web Start implementation
 
@@ -19,13 +21,9 @@ Group:      Applications/Internet
 License:    LGPLv2+ and GPLv2 with exceptions
 URL:        http://icedtea.classpath.org/wiki/IcedTea-Web
 Source0:    http://icedtea.classpath.org/download/source/%{name}-%{version}.tar.gz
-Source1:    icedtea-web.metainfo.xml
-Source2:    icedtea-web-javaws.appdata.xml
-Patch0:     javadocFixes.patch
-Patch1:		donLogToFileBeforeFileLogsInitiate.patch
-Patch2:		fileLogInitializationError-1.6.patch
 
-BuildRequires:  java-%{javaver}-openjdk-devel
+BuildRequires:  jpackage-utils
+BuildRequires:  %{preffered_java}-devel
 BuildRequires:  desktop-file-utils
 BuildRequires:  gecko-devel
 BuildRequires:  glib2-devel
@@ -40,7 +38,11 @@ BuildRequires:  tagsoup
 BuildRequires:      rhino
 
 # For functionality and the OpenJDK dirs
-Requires:      java-%{javaver}-openjdk
+Requires:      %{preffered_java}
+Requires:      jpackage-utils
+#maven fragments
+Requires(post):      jpackage-utils
+Requires(postun):      jpackage-utils
 
 # For the mozilla plugin dir
 Requires:       mozilla-filesystem%{?_isa}
@@ -51,20 +53,21 @@ Requires:      tagsoup
 # rhino is used as JS evaluator in runtime
 Requires:      rhino
 
-# Post requires alternatives to install plugin alternative.
+# Post requires alternatives to install tool alternatives.
 Requires(post):   %{_sbindir}/alternatives
-
-# Postun requires alternatives to uninstall plugin alternative.
+# in version 1.7 and higher for --family switch
+Requires(post):   chkconfig >= 1.7
+# Postun requires alternatives to uninstall tool alternatives.
 Requires(postun): %{_sbindir}/alternatives
+# in version 1.7 and higher for --family switch
+Requires(postun):   chkconfig >= 1.7
 
 # Standard JPackage plugin provides.
 Provides: java-plugin = 1:%{javaver}
 Provides: javaws      = 1:%{javaver}
 
-Provides:   java-%{javaver}-openjdk-plugin =  1:%{version}
+Provides:   %{preffered_java}-plugin =  1:%{version}
 Obsoletes:  java-1.6.0-openjdk-plugin
-
-
 
 %description
 The IcedTea-Web project provides a Java web browser plugin, an implementation
@@ -84,9 +87,6 @@ This package contains Javadocs for the IcedTea-Web project.
 
 %prep
 %setup -q
-%patch0
-%patch1 -p1
-%patch2 -p1
 
 %build
 autoreconf -vfi
@@ -122,23 +122,41 @@ desktop-file-install --vendor ''\
   --dir $RPM_BUILD_ROOT%{_datadir}/applications policyeditor.desktop
 
 # install MetaInfo file for firefox
-DESTDIR=%{buildroot} appstream-util install %{SOURCE1}
+DESTDIR=%{buildroot} appstream-util install metadata/%{name}.metainfo.xml
+# install MetaInfo file for javaws
+DESTDIR=%{buildroot} appstream-util install metadata/%{name}-javaws.appdata.xml
+
+# maven fragments generation
+mkdir -p $RPM_BUILD_ROOT%{_javadir}
+pushd $RPM_BUILD_ROOT%{_javadir}
+ln -s ../%{name}/netx.jar %{name}.jar
+ln -s ../%{name}/plugin.jar %{name}-plugin.jar
+popd
+mkdir -p $RPM_BUILD_ROOT/%{_mavenpomdir}
+cp  metadata/%{name}.pom  $RPM_BUILD_ROOT/%{_mavenpomdir}/%{name}.pom
+cp metadata/%{name}-plugin.pom  $RPM_BUILD_ROOT/%{_mavenpomdir}/%{name}-plugin.pom
+
+# __main__.IncompatibleFilenames: Filenames of POM /builddir/build/BUILDROOT/icedtea-web-1.6.2-1.el7.x86_64/usr/share/maven-poms/icedtea-web.pom and JAR /builddir/build/BUILDROOT/icedtea-web-1.6.2-1.el7.x86_64/usr/share/java/icedtea-web.jar does not match properly. Check that JAR subdirectories matches '.' in pom name.
+# resolve before  7.2.z!
+#add_maven_depmap %{name}.pom %{name}.jar
+#add_maven_depmap %{name}-plugin.pom %{name}-plugin.jar
+
+
 
 %check
 make check
-appstream-util validate $RPM_BUILD_ROOT/%{_datadir}/appdata/*.xml
+appstream-util validate $RPM_BUILD_ROOT/%{_datadir}/appdata/*.xml || :
 
 %post
 alternatives \
   --install %{_libdir}/mozilla/plugins/libjavaplugin.so %{javaplugin} \
-  %{_libdir}/IcedTeaPlugin.so %{priority} \
+  %{_libdir}/IcedTeaPlugin.so %{priority}  --family %{preffered_java}.%{_arch} \
   --slave %{_bindir}/javaws javaws %{_prefix}/bin/javaws%{binsuffix} \
   --slave %{_mandir}/man1/javaws.1.gz javaws.1.gz \
   %{_mandir}/man1/javaws-itweb.1.gz
 
 %posttrans
 update-desktop-database &> /dev/null || :
-
 exit 0
 
 %postun
@@ -148,22 +166,27 @@ then
   alternatives --remove %{javaplugin} \
     %{_libdir}/IcedTeaPlugin.so
 fi
-
 exit 0
 
+# files -f .mfiles
 %files
 %defattr(-,root,root,-)
-%{_sysconfdir}/bash_completion.d/
+%{_sysconfdir}/bash_completion.d/icedteaweb-completion
 %{_prefix}/bin/*
 %{_libdir}/IcedTeaPlugin.so
 %{_datadir}/applications/*
-%{_datadir}/icedtea-web
+%{_datadir}/%{name}
 %{_datadir}/man/man1/*
 %{_datadir}/man/cs/man1/*
 %{_datadir}/man/de/man1/*
 %{_datadir}/man/pl/man1/*
 %{_datadir}/pixmaps/*
 %{_datadir}/appdata/*.xml
+# thsoe four shouldnotbe there. Fixme! something went wrong
+%{_mavenpomdir}/%{name}.pom
+%{_mavenpomdir}/%{name}-plugin.pom
+%{_javadir}/%{name}.jar
+%{_javadir}/%{name}-plugin.jar
 %doc NEWS README COPYING
 
 %files javadoc
@@ -172,6 +195,21 @@ exit 0
 %doc COPYING
 
 %changelog
+* Thu Jul 14 2016 Jiri Vanek <jvanek@redhat.com> 1.6.2-4
+- fixed typo in provides
+- Resolves: rhbz#1299537
+
+* Wed Jul 13 2016 Jiri Vanek <jvanek@redhat.com> 1.6.2-3
+- added --family to make it part of javas alternatives alignment
+- java-javaver-openjdk collected into preffered_java 
+- Resolves: rhbz#1299537
+
+* Wed Feb 03 2016 Jiri Vanek <jvanek@redhat.com> 1.6.2-1
+- updated to 1.6.2
+- fixed also rhbz#1303437 - package owns /etc/bash_completion.d but it should not own it 
+- generated maven metadata (isntalled but not used. %add_maven_depmap need tobe fixed)
+- Resolves: rhbz#1299537
+
 * Wed Oct 14 2015 Jiri Vanek <jvanek@redhat.com> 1.6.1-4
 - added and and applied patch2 fileLogInitializationError-1.6.patch to prevent 
 consequences 1268909
